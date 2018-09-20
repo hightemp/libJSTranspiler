@@ -3,5 +3,8 @@
     "description": "JS to PHP transpiler",
     "type": "library",
     "license": "MIT",
-    "require": {}
+    "require": {},
+    "autoload": {
+      "psr-4": {"libJSTranspiler\\": "src/"}
+    }
 }

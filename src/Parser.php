@@ -7,6 +7,9 @@ use libJSTranspiler\TokenType;
 use libJSTranspiler\Identifier;
 use libJSTranspiler\Whitespace;
 use libJSTranspiler\TokenContext;
+use libJSTranspiler\Utilities;
+use libJSTranspiler\Scope;
+use Closure;
 
 if (!function_exists('fnKeywordRegexp')) {
   function fnKeywordRegexp($sString)
@@ -41,6 +44,11 @@ class Parser
   public $aContext;
   public $bExprAllowed;
   public $bInModule;
+  public $iYieldPos;
+  public $iAwaitPos;
+  public $aLabels;
+  public $aScopeStack;
+  
   
   public static $aDefaultOptions = [
     // `ecmaVersion` indicates the ECMAScript version to parse. Must be
@@ -223,33 +231,36 @@ class Parser
 
     // Figure out if it's a module code.
     $this->bInModule = $aOptions['sourceType'] === "module";
-    $this->strict = $this->bInModule || $this->strictDirective($this->pos)
+    $this->strict = $this->bInModule || $this->fnStrictDirective($this->iPos);
 
     // Used to signify the start of a potential arrow function
-    $this->potentialArrowAt = -1
+    $this->potentialArrowAt = -1;
 
     // Positions to delayed-check that yield/await does not exist in default parameters.
-    $this->yieldPos = $this->awaitPos = 0
+    $this->iYieldPos = $this->iAwaitPos = 0;
     // Labels in scope.
-    $this->labels = []
+    $this->aLabels = [];
 
     // If enabled, skip leading hashbang line.
-    if ($this->pos === 0 && options.allowHashBang && $this->input.slice(0, 2) === "#!")
-      $this->skipLineComment(2)
+    if ($this->iPos === 0 && $aOptions['allowHashBang'] && mb_substr($this->sInput, 0, 2) === "#!")
+      $this->fnSkipLineComment(2);
 
     // Scope tracking for duplicate variable names (see scope.js)
-    $this->scopeStack = []
-    $this->enterScope(SCOPE_TOP)
+    $this->aScopeStack = [];
+    $this->fnEnterScope(Scope::SCOPE_TOP);
 
     // For RegExp validation
-    $this->regexpState = null    
+    $this->regexpState = null;
+  }
+  
+  public function fnEnterScope($iFlags) 
+  {
+    array_push($this->aScopeStack, new Scope($iFlags));
   }
   
   public function fnStrictDirective($iStart) 
   {
     for (;;) {
-      Whitespace::skipWhiteSpace;
-      .lastIndex = start
       $aMatches = [];
       preg_match(
         Whitespace::skipWhiteSpace, 
@@ -258,14 +269,52 @@ class Parser
         0,
         $iStart
       );
-      start += strlen(@$aMatches[0]);
-      let match = literal.exec(this.input.slice(start))
-      if (!match) return false
-      if ((match[1] || match[2]) === "use strict") return true
-      start += match[0].length
+      $iStart += mb_strlen(@$aMatches[0]);
+      
+      $aMatches = [];
+      $sLiteral = "/^(?:'((?:\\.|[^'])*?)'|\"((?:\\.|[^\"])*?)\"|;)/";
+      preg_match(
+        $sLiteral,
+        mb_substr($this->sInput, $iStart),
+        $aMatches
+      );
+      
+      if (empty($aMatches)) 
+        return false;
+      
+      if (@$aMatches[1] == "use strict" || @$aMatches[2] == "use strict") 
+        return true;
+      
+      $iStart += mb_strlen($aMatches[0]);
     }
   }
-  public function fnInitialContext
+  
+  public function fnSkipLineComment($iStartSkip) 
+  {
+    $iStart = $this->iPos;
+    $oStartLoc = null;
+    
+    if (isset($this->aOptions['onComment']))
+      $oStartLoc = $this->fnCurPosition();
+    
+    $iCh = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos += $iStartSkip);
+    while ($this->iPos < mb_strlen($this->sInput) && !isNewLine($iCh)) {
+      $iCh = Utilities::fnGetCharCodeAt($this->sInput, ++$this->iPos);
+    }
+    if (is_callable($this->options['onComment'])) {
+      $fnOnComment = Closure::bind($this->options['onComment'], $this);
+      $fnOnComment(
+        false, 
+        mb_substr($this->sInput, $iStart + $iStartSkip, $this->iPos - $iStart - $iStartSkip),
+        $iStart, 
+        $this->iPos,
+        $oStartLoc, 
+        $this->fnCurPosition()
+      );
+    }
+  }
+  
+  public function fnInitialContext()
   {
     return [TokenContextTypes::$aTypes['b_stat']];
   }
