@@ -1,0 +1,7 @@
+{
+    "name": "hightemp/lib-js-transpiler",
+    "description": "JS to PHP transpiler",
+    "type": "library",
+    "license": "MIT",
+    "require": {}
+}
