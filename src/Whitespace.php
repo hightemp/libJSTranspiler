@@ -4,7 +4,7 @@ namespace libJSTranspiler;
 
 class Whitespace
 {
-  const lineBreak = "/\r\n?|\n|\u2028|\u2029/";
+  const lineBreak = "/\r\n?|\n|\x{2028}|\x{2029}/";
   const lineBreakG = self::lineBreak."g";
 
   public static function fnIsNewLine($iCode, $bEcma2019String) 
@@ -14,6 +14,6 @@ class Whitespace
       || (!$bEcma2019String && ($iCode === 0x2028 || $iCode === 0x2029));
   }
 
-  const nonASCIIwhitespace = "/[\u1680\u180e\u2000-\u200a\u202f\u205f\u3000\ufeff]/";
-  const skipWhiteSpace = "/(?:\s|\/\/.*|\/\*[^]*?\*\/)*/g";
+  const nonASCIIwhitespace = "/[\x{1680}\x{180e}\x{2000}-\x{200a}\x{202f}\x{205f}\x{3000}\x{feff}]/";
+  const skipWhiteSpace = "/(?:\s|\/\/.*|\/\*[\W\w]*?\*\/)*/";
 }

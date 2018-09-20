@@ -4,4 +4,6 @@ include "../vendor/autoload.php";
 
 use libJSTranspiler\Parser;
 
-$oParser = new Parser();
+$aOptions = [];
+$sInput = file_get_contents("example.js");
+$oParser = Parser::fnParse($sInput, $aOptions);

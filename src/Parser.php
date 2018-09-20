@@ -4,6 +4,7 @@ namespace libJSTranspiler;
 
 use libJSTranspiler\Node;
 use libJSTranspiler\TokenType;
+use libJSTranspiler\TokenTypes;
 use libJSTranspiler\Identifier;
 use libJSTranspiler\Whitespace;
 use libJSTranspiler\TokenContext;
@@ -174,7 +175,7 @@ class Parser
     
     $sReserved = "";
     if (!$aOptions['allowReserved']) {
-      for ($iV = $aOptions['ecmaVersion'];; $iV--)
+      for ($iV = $aOptions['ecmaVersion'];$iV; $iV--)
         if (isset(Identifier::$aReservedWords[$iV])) {
           $sReserved = Identifier::$aReservedWords[$iV];
           break;
@@ -258,6 +259,70 @@ class Parser
     array_push($this->aScopeStack, new Scope($iFlags));
   }
   
+  public function fnExitScope() 
+  {
+    array_pop($this->aScopeStack);
+  }
+
+  public function fnDeclareName($sName, $iBindingType, $iPos) 
+  {
+    $bRedeclared = false;
+    
+    if ($iBindingType === BIND_LEXICAL) {
+      $oScope = $this->fnCurrentScope();
+      $bRedeclared = in_array($sName, $oScope->aLexical) || in_array($sName, $oScope->aVar);
+      array_push($oScope->aLexical, $sName);
+    } else if ($iBindingType === BIND_SIMPLE_CATCH) {
+      $oScope = $this->fnCurrentScope();
+      array_push($oScope->aLexical, $sName);
+    } else if ($iBindingType === BIND_FUNCTION) {
+      $oScope = $this->fnCurrentScope();
+      $bRedeclared = in_array($sName, $oScope->aLexical);
+      array_push($oScope->aVar, $sName);
+    } else {
+      for ($iI = count($this->aScopeStack) - 1; $iI >= 0; --$iI) {
+        $oScope = $this->aScopeStack[$iI];
+        if (in_array($sName, $oScope->aLexical) 
+              && !($oScope->iFlags & Scope::SCOPE_SIMPLE_CATCH) 
+              && $oScope->aLexical[0] === $sName) 
+          $bRedeclared = true;
+        array_push($oScope->aVar, $sName);
+        if ($oScope->iFlags & Scope::SCOPE_VAR) 
+          break;
+      }
+    }
+    
+    if ($bRedeclared) 
+      $this->fnRaiseRecoverable(
+        $iPos, 
+        "Identifier '$sName' has already been declared"
+      );
+  }
+
+  public function fnCurrentScope()
+  {
+    return $this->aScopeStack[count($this->aScopeStack) - 1];
+  }
+
+  public function fnCurrentVarScope()
+  {
+    for ($iI = count($this->aScopeStack) - 1;; $iI--) {
+      $oScope = $this->aScopeStack[$iI];
+      if ($oScope->iFlags & Scope::SCOPE_VAR) 
+        return $oScope;
+    }
+  }
+
+  public function fnInNonArrowFunction()
+  {
+    for ($iI = count($this->aScopeStack) - 1; $iI >= 0; $iI--)
+      if ($this->aScopeStack[$iI]->iFlags 
+          & Scope::SCOPE_FUNCTION 
+          && !($this->aScopeStack[$iI]->iFlags & Scope::SCOPE_ARROW))
+        return true;
+    return false;
+  }  
+  
   public function fnStrictDirective($iStart) 
   {
     for (;;) {
@@ -313,6 +378,20 @@ class Parser
       );
     }
   }
+
+  public function inFunction() 
+  { 
+    return ($this->fnCurrentVarScope()->iFlags & Scope::SCOPE_FUNCTION) > 0;
+  }
+  
+  public function inGenerator() 
+  { 
+    return ($this->fnCurrentVarScope()->iFlags & Scope::SCOPE_GENERATOR) > 0; 
+  }
+  public function inAsync() 
+  {
+    return ($this->fnCurrentVarScope()->iFlags & Scope::SCOPE_ASYNC) > 0;
+  }
   
   public function fnInitialContext()
   {
@@ -328,22 +407,26 @@ class Parser
   
   public function fnParseI()
   {
-    
+    $oNode = $this->$aOptions['program'] || $this->fnStartNode();
+    $this->fnNextToken();
+    return $this->fnParseTopLevel($oNode);
   }
   
   public static function fnParse($sInput, $aOptions)
   {
-    return (new Parser($sInput, $aOptions))->fnParseI();
+    return (new self($aOptions, $sInput))->fnParseI();
   }
   
   public static function fnParseExpressionAt($sInput, $iPos, $aOptions)
   {
-    
+    $oParser = new self($aOptions, $sInput, $iPos);
+    $oParser->fnNextToken();
+    return $oParser->fnParseExpression();
   }
   
   public static function fnTokenizer($sInput, $aOptions)
   {
-    
+    return new self($aOptions, $sInput);
   }
   
   public static function fnExtend(...$aPlugins)

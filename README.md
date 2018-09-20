@@ -4,3 +4,4 @@
 
 * PHP 5.6+
 * mb
+* iconv
