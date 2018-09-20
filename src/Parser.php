@@ -323,6 +323,41 @@ class Parser
     return false;
   }  
   
+  public function fnStartNode() 
+  {
+    return new Node($this, $this->iStart, $this->oStartLoc);
+  }
+  
+  public function fnStartNodeAt($iPos, $oLoc) 
+  {
+    return new Node($this, $iPos, $oLoc);
+  }
+
+  // Finish an AST node, adding `type` and `end` properties.
+
+  public function _fnFinishNodeAt($oNode, $sType, $iPos, $oLoc) 
+  {
+    $oNode->sType = $sType;
+    $oNode->iEnd = $iPos;
+    if ($this->aOptions['locations'])
+      $oNode->oLoc->oEnd = $oLoc;
+    if ($this->aOptions['ranges'])
+      $oNode->aRange[1] = $iPos;
+    return $oNode;
+  }
+
+  public function fnFinishNode($oNode, $sType) 
+  {
+    return $this->_fnFinishNodeAt($oNode, $sType, $this->iLastTokEnd, $this->oLastTokEndLoc);
+  }
+
+  // Finish node at given position
+
+  public function fnFinishNodeAt($oNode, $sType, $iPos, $oLoc) 
+  {
+    return $this->_fnFinishNodeAt($oNode, $sType, $iPos, $oLoc);
+  }
+  
   public function fnStrictDirective($iStart) 
   {
     for (;;) {

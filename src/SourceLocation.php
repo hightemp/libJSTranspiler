@@ -4,13 +4,6 @@ namespace libJSTranspiler;
 
 use libJSTranspiler\Parser;
 
-class Position
-{
-  public $iLine; 
-  public $iColumn; 
-  public $iOffset;
-}
-
 class SourceLocation 
 {
   public $oStart;
