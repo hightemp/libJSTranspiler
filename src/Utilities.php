@@ -11,6 +11,7 @@ class Utilities
 
   public static function fnGetCharCodeAt($sString, $iIndex)
   {
+    // FIXME:
     return self::fnUniord(self::fnGetCharAt($sString, $iIndex));
   }
   
