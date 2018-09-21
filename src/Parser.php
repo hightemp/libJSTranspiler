@@ -12,6 +12,7 @@ use libJSTranspiler\TokenContext;
 use libJSTranspiler\Utilities;
 use libJSTranspiler\Scope;
 use Closure;
+use Exception;
 
 if (!function_exists('fnKeywordRegexp')) {
   function fnKeywordRegexp($sString)
@@ -19,6 +20,8 @@ if (!function_exists('fnKeywordRegexp')) {
     return "/^(?:" . str_replace(" ", "|", $sString) . ")$/";
   }
 }
+
+class InvalidTemplateEscapeError extends Exception { }
 
 class Parser
 {
@@ -50,7 +53,9 @@ class Parser
   public $iAwaitPos;
   public $aLabels;
   public $aScopeStack;
-  
+  public $oRegexpState;
+  public $bStrict;
+  public $iPotentialArrowAt;
   
   public static $aDefaultOptions = [
     // `ecmaVersion` indicates the ECMAScript version to parse. Must be
@@ -182,10 +187,10 @@ class Parser
           break;
         }
       if ($aOptions['sourceType'] === "module") 
-        $sReserved += " await";
+        $sReserved .= " await";
     }
     $this->sReservedWords = fnKeywordRegexp($sReserved);
-    $sReservedStrict = ($sReserved ? $sReserved . " " : "") + Identifier::$aReservedWords['strict'];
+    $sReservedStrict = ($sReserved ? $sReserved . " " : "") . Identifier::$aReservedWords['strict'];
     $this->sReservedWordsStrict = fnKeywordRegexp($sReservedStrict);
     $this->sReservedWordsStrictBind = fnKeywordRegexp($sReservedStrict . " " . Identifier::$aReservedWords['strictBind']);
     $this->sInput = $sInput;
@@ -233,10 +238,10 @@ class Parser
 
     // Figure out if it's a module code.
     $this->bInModule = $aOptions['sourceType'] === "module";
-    $this->strict = $this->bInModule || $this->fnStrictDirective($this->iPos);
+    $this->bStrict = $this->bInModule || $this->fnStrictDirective($this->iPos);
 
     // Used to signify the start of a potential arrow function
-    $this->potentialArrowAt = -1;
+    $this->iPotentialArrowAt = -1;
 
     // Positions to delayed-check that yield/await does not exist in default parameters.
     $this->iYieldPos = $this->iAwaitPos = 0;
@@ -399,11 +404,11 @@ class Parser
       $oStartLoc = $this->fnCurPosition();
     
     $iCh = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos += $iStartSkip);
-    while ($this->iPos < mb_strlen($this->sInput) && !isNewLine($iCh)) {
+    while ($this->iPos < mb_strlen($this->sInput) && !Whitespace::fnIsNewLine($iCh)) {
       $iCh = Utilities::fnGetCharCodeAt($this->sInput, ++$this->iPos);
     }
-    if (is_callable($this->options['onComment'])) {
-      $fnOnComment = Closure::bind($this->options['onComment'], $this);
+    if (is_callable($this->aOptions['onComment'])) {
+      $fnOnComment = Closure::bind($this->aOptions['onComment'], $this);
       $fnOnComment(
         false, 
         mb_substr($this->sInput, $iStart + $iStartSkip, $this->iPos - $iStart - $iStartSkip),
@@ -441,7 +446,7 @@ class Parser
         next: () => {
           let token = $this->getToken()
           return {
-            done: token.type === tt.eof,
+            done: token.type === TokenTypes::$aTypes['eof'],
             value: token
           }
         }
@@ -505,7 +510,7 @@ class Parser
     if (is_callable($this->aOptions['onComment']))
       $oStartLoc = $this->fnCurPosition();
     
-    $iStart = $this->pos;
+    $iStart = $this->iPos;
     $iEnd = mb_strpos($this->sInput, "*/", $this->iPos += 2);
     if ($iEnd === false) 
       $this->fnRaise($this->iPos - 2, "Unterminated comment");
@@ -734,306 +739,393 @@ class Parser
     return $this->fnFinishOp(TokenTypes::$aTypes['plusMin'], 1);
   }
 
-  pp.readToken_lt_gt = function(code) { // '<>'
-    let next = $this->input.charCodeAt($this->pos + 1)
-    let size = 1
-    if (next === code) {
-      size = code === 62 && $this->input.charCodeAt($this->pos + 2) === 62 ? 3 : 2
-      if ($this->input.charCodeAt($this->pos + size) === 61) return $this->finishOp(tt.assign, size + 1)
-      return $this->finishOp(tt.bitShift, size)
+  public function fnReadToken_lt_gt($iCode) 
+  { // '<>'
+    $iNext = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 1);
+    $iSize = 1;
+    if ($iNext === $iCode) {
+      $iSize = $iCode === 62 
+        && Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 2) === 62 ? 
+          3 : 
+          2;
+      if (Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + $iSize) === 61) 
+        return $this->fnFinishOp(TokenTypes::$aTypes['assign'], $iSize + 1);
+      return $this->fnFinishOp(TokenTypes::$aTypes['bitShift'], $iSize);
     }
-    if (next === 33 && code === 60 && !$this->inModule && $this->input.charCodeAt($this->pos + 2) === 45 &&
-        $this->input.charCodeAt($this->pos + 3) === 45) {
+    if ($iNext === 33 
+        && $iCode === 60 
+        && !$this->bInModule 
+        && Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 2) === 45 
+        && Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 3) === 45) {
       // `<!--`, an XML-style comment that should be interpreted as a line comment
-      $this->skipLineComment(4)
-      $this->skipSpace()
-      return $this->nextToken()
+      $this->fnSkipLineComment(4);
+      $this->fnSkipSpace();
+      return $this->fnNextToken();
     }
-    if (next === 61) size = 2
-    return $this->finishOp(tt.relational, size)
+    if ($iNext === 61) 
+      $iSize = 2;
+    return $this->fnFinishOp(TokenTypes::$aTypes['relational'], $iSize);
   }
 
-  pp.readToken_eq_excl = function(code) { // '=!'
-    let next = $this->input.charCodeAt($this->pos + 1)
-    if (next === 61) return $this->finishOp(tt.equality, $this->input.charCodeAt($this->pos + 2) === 61 ? 3 : 2)
-    if (code === 61 && next === 62 && $this->options.ecmaVersion >= 6) { // '=>'
-      $this->pos += 2
-      return $this->finishToken(tt.arrow)
+  public function fnReadToken_eq_excl($iCode) 
+  { // '=!'
+    $iNext = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 1);
+    if ($iNext === 61) 
+      return $this->fnFinishOp(
+        TokenTypes::$aTypes['equality'], 
+        Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 2) === 61 ? 
+          3 : 
+          2
+      );
+    if ($iCode === 61 && next === 62 && $this->aOptions['ecmaVersion'] >= 6) { // '=>'
+      $this->iPos += 2;
+      return $this->fnFinishToken(TokenTypes::$aTypes['arrow']);
     }
-    return $this->finishOp(code === 61 ? tt.eq : tt.prefix, 1)
+    return $this->fnFinishOp($iCode === 61 ? TokenTypes::$aTypes['eq'] : TokenTypes::$aTypes['prefix'], 1);
   }
 
-  pp.getTokenFromCode = function(code) {
-    switch (code) {
-    // The interpretation of a dot depends on whether it is followed
-    // by a digit or another two dots.
-    case 46: // '.'
-      return $this->readToken_dot()
+  public function getTokenFromCode($iCode) 
+  {
+    switch ($iCode) {
+      // The interpretation of a dot depends on whether it is followed
+      // by a digit or another two dots.
+      case 46: // '.'
+        return $this->fnReadToken_dot();
 
-    // Punctuation tokens.
-    case 40: ++$this->pos; return $this->finishToken(tt.parenL)
-    case 41: ++$this->pos; return $this->finishToken(tt.parenR)
-    case 59: ++$this->pos; return $this->finishToken(tt.semi)
-    case 44: ++$this->pos; return $this->finishToken(tt.comma)
-    case 91: ++$this->pos; return $this->finishToken(tt.bracketL)
-    case 93: ++$this->pos; return $this->finishToken(tt.bracketR)
-    case 123: ++$this->pos; return $this->finishToken(tt.braceL)
-    case 125: ++$this->pos; return $this->finishToken(tt.braceR)
-    case 58: ++$this->pos; return $this->finishToken(tt.colon)
-    case 63: ++$this->pos; return $this->finishToken(tt.question)
+      // Punctuation tokens.
+      case 40: ++$this->iPos; return $this->fnFinishToken(TokenTypes::$aTypes['parenL']);
+      case 41: ++$this->iPos; return $this->fnFinishToken(TokenTypes::$aTypes['parenR']);
+      case 59: ++$this->iPos; return $this->fnFinishToken(TokenTypes::$aTypes['semi']);
+      case 44: ++$this->iPos; return $this->fnFinishToken(TokenTypes::$aTypes['comma']);
+      case 91: ++$this->iPos; return $this->fnFinishToken(TokenTypes::$aTypes['bracketL']);
+      case 93: ++$this->iPos; return $this->fnFinishToken(TokenTypes::$aTypes['bracketR']);
+      case 123: ++$this->iPos; return $this->fnFinishToken(TokenTypes::$aTypes['braceL']);
+      case 125: ++$this->iPos; return $this->fnFinishToken(TokenTypes::$aTypes['braceR']);
+      case 58: ++$this->iPos; return $this->fnFinishToken(TokenTypes::$aTypes['colon']);
+      case 63: ++$this->iPos; return $this->fnFinishToken(TokenTypes::$aTypes['question']);
 
-    case 96: // '`'
-      if ($this->options.ecmaVersion < 6) break
-      ++$this->pos
-      return $this->finishToken(tt.backQuote)
+      case 96: // '`'
+        if ($this->aOptions['ecmaVersion'] < 6) 
+          break;
+        ++$this->iPos;
+        return $this->fnFinishToken(TokenTypes::$aTypes['backQuote']);
 
-    case 48: // '0'
-      let next = $this->input.charCodeAt($this->pos + 1)
-      if (next === 120 || next === 88) return $this->readRadixNumber(16) // '0x', '0X' - hex number
-      if ($this->options.ecmaVersion >= 6) {
-        if (next === 111 || next === 79) return $this->readRadixNumber(8) // '0o', '0O' - octal number
-        if (next === 98 || next === 66) return $this->readRadixNumber(2) // '0b', '0B' - binary number
-      }
+      case 48: // '0'
+        $iNext = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 1);
+        if ($iNext === 120 || $iNext === 88) 
+          return $this->fnReadRadixNumber(16); // '0x', '0X' - hex number
+        if ($this->aOptions.ecmaVersion >= 6) {
+          if (next === 111 || next === 79) 
+            return $this->fnReadRadixNumber(8); // '0o', '0O' - octal number
+          if (next === 98 || next === 66) 
+            return $this->fnReadRadixNumber(2); // '0b', '0B' - binary number
+        }
 
-    // Anything else beginning with a digit is an integer, octal
-    // number, or float.
-    case 49: case 50: case 51: case 52: case 53: case 54: case 55: case 56: case 57: // 1-9
-      return $this->readNumber(false)
+      // Anything else beginning with a digit is an integer, octal
+      // number, or float.
+      case 49: case 50: case 51: case 52: case 53: case 54: case 55: case 56: case 57: // 1-9
+        return $this->fnReadNumber(false);
 
-    // Quotes produce strings.
-    case 34: case 39: // '"', "'"
-      return $this->readString(code)
+      // Quotes produce strings.
+      case 34: case 39: // '"', "'"
+        return $this->fnReadString($iCode);
 
-    // Operators are parsed inline in tiny state machines. '=' (61) is
-    // often referred to. `finishOp` simply skips the amount of
-    // characters it is given as second argument, and returns a token
-    // of the type given by its first argument.
+      // Operators are parsed inline in tiny state machines. '=' (61) is
+      // often referred to. `finishOp` simply skips the amount of
+      // characters it is given as second argument, and returns a token
+      // of the type given by its first argument.
 
-    case 47: // '/'
-      return $this->readToken_slash()
+      case 47: // '/'
+        return $this->fnReadToken_slash();
 
-    case 37: case 42: // '%*'
-      return $this->readToken_mult_modulo_exp(code)
+      case 37: case 42: // '%*'
+        return $this->fnReadToken_mult_modulo_exp($iCode);
 
-    case 124: case 38: // '|&'
-      return $this->readToken_pipe_amp(code)
+      case 124: case 38: // '|&'
+        return $this->fnReadToken_pipe_amp($iCode);
 
-    case 94: // '^'
-      return $this->readToken_caret()
+      case 94: // '^'
+        return $this->fnReadToken_caret();
 
-    case 43: case 45: // '+-'
-      return $this->readToken_plus_min(code)
+      case 43: case 45: // '+-'
+        return $this->fnReadToken_plus_min($iCode);
 
-    case 60: case 62: // '<>'
-      return $this->readToken_lt_gt(code)
+      case 60: case 62: // '<>'
+        return $this->fnReadToken_lt_gt($iCode);
 
-    case 61: case 33: // '=!'
-      return $this->readToken_eq_excl(code)
+      case 61: case 33: // '=!'
+        return $this->fnReadToken_eq_excl($iCode);
 
-    case 126: // '~'
-      return $this->finishOp(tt.prefix, 1)
+      case 126: // '~'
+        return $this->fnFinishOp(TokenTypes::$aTypes['prefix'], 1);
     }
 
-    $this->raise($this->pos, "Unexpected character '" + codePointToString(code) + "'")
+    $this->fnRaise($this->iPos, "Unexpected character '" . $this->fnCodePointToString($iCode) . "'");
   }
 
-  pp.finishOp = function(type, size) {
-    let str = $this->input.slice($this->pos, $this->pos + size)
-    $this->pos += size
-    return $this->finishToken(type, str)
+  public function fnCodePointToString($iCode) 
+  {
+    // UTF-16 Decoding
+    if ($iCode <= 0xFFFF) 
+      return Utilities::fnUnichr($iCode);
+    $iCode -= 0x10000;
+    return Utilities::fnUnichr(($iCode >> 10) + 0xD800, ($iCode & 1023) + 0xDC00);
+  }
+  
+  public function fnFinishOp($oType, $iSize) 
+  {
+    $sStr = mb_substr($this->sInput, $this->iPos, $iSize);
+    $this->iPos += $iSize;
+    return $this->fnFinishToken($oType, $sStr);
   }
 
-  pp.readRegexp = function() {
-    let escaped, inClass, start = $this->pos
+  public function fnReadRegexp() 
+  {
+    $bEscaped = false;
+    $bInClass = false;
+    $iStart = $this->iPos;
+    
     for (;;) {
-      if ($this->pos >= $this->input.length) $this->raise(start, "Unterminated regular expression")
-      let ch = $this->input.charAt($this->pos)
-      if (lineBreak.test(ch)) $this->raise(start, "Unterminated regular expression")
-      if (!escaped) {
-        if (ch === "[") inClass = true
-        else if (ch === "]" && inClass) inClass = false
-        else if (ch === "/" && !inClass) break
-        escaped = ch === "\\"
-      } else escaped = false
-      ++$this->pos
+      if ($this->iPos >= mb_strlen($this->sInput)) 
+        $this->fnRaise($iStart, "Unterminated regular expression");
+      
+      $sCh = Utilities::fnGetCharAt($this->sInput, $this->iPos);
+      if (preg_match(Whitespace::lineBreak, $sCh)) 
+        $this->fnRaise($iStart, "Unterminated regular expression");
+              
+      if (!$bEscaped) {
+        if ($sCh === "[") 
+          $bInClass = true;
+        else if ($sCh === "]" && $bInClass) 
+          $bInClass = false;
+        else if ($sCh === "/" && !$bInClass) 
+          break;
+        $bEscaped = $sCh === "\\";
+      } else 
+        $bEscaped = false;
+      ++$this->iPos;
     }
-    let pattern = $this->input.slice(start, $this->pos)
-    ++$this->pos
-    let flagsStart = $this->pos
-    let flags = $this->readWord1()
-    if ($this->containsEsc) $this->unexpected(flagsStart)
+    
+    $sPattern = mb_substr($this->sInput, $iStart, $this->iPos - $iStart);
+    ++$this->iPos;
+    $iFlagsStart = $this->iPos;
+    $iFlags = $this->fnReadWord1();
+    
+    if ($this->bContainsEsc) 
+      $this->fnUnexpected($iFlagsStart);
 
     // Validate pattern
-    const state = $this->regexpState || ($this->regexpState = new RegExpValidationState(this))
-    state.reset(start, pattern, flags)
-    $this->validateRegExpFlags(state)
-    $this->validateRegExpPattern(state)
+    $oState = $this->oRegexpState ? 
+      $this->oRegexpState : 
+      $this->oRegexpState = new RegExpValidationState($this);
+    $oState->fnReset($iStart, $sPattern, $iFlags);
+    $this->fnValidateRegExpFlags($oState);
+    $this->fnValidateRegExpPattern($oState);
 
     // Create Literal#value property value.
-    let value = null
+    $oValue = null;
+    /*
     try {
       value = new RegExp(pattern, flags)
     } catch (e) {
       // ESTree requires null if it failed to instantiate RegExp object.
       // https://github.com/estree/estree/blob/a27003adf4fd7bfad44de9cef372a2eacd527b1c/es5.md#regexpliteral
     }
-
-    return $this->finishToken(tt.regexp, {pattern, flags, value})
+    */
+    return $this->fnFinishToken(TokenTypes::$aTypes['regexp'], [$sPattern, $iFlags, $oValue]);
   }
 
   // Read an integer in the given radix. Return null if zero digits
   // were read, the integer value otherwise. When `len` is given, this
   // will return `null` unless the integer has exactly `len` digits.
 
-  pp.readInt = function(radix, len) {
-    let start = $this->pos, total = 0
-    for (let i = 0, e = len == null ? Infinity : len; i < e; ++i) {
-      let code = $this->input.charCodeAt($this->pos), val
-      if (code >= 97) val = code - 97 + 10 // a
-      else if (code >= 65) val = code - 65 + 10 // A
-      else if (code >= 48 && code <= 57) val = code - 48 // 0-9
-      else val = Infinity
-      if (val >= radix) break
-      ++$this->pos
-      total = total * radix + val
+  public function fnReadInt($iRadix, $iLen) 
+  {
+    $iStart = $this->iPos;
+    $iTotal = 0;
+    for ($iI = 0, $iE = $iLen == null ? INF : $iLen; $iI < $iE; ++$iI) {
+      $iCode = Utilities::fnGetCharAt($this->sInput, $this->iPos);
+      $iVal;
+      if ($iCode >= 97) 
+        $iVal = $iCode - 97 + 10; // a
+      else if ($iCode >= 65) 
+        $iVal = $iCode - 65 + 10; // A
+      else if ($iCode >= 48 && $iCode <= 57) 
+        $iVal = $iCode - 48; // 0-9
+      else 
+        $iVal = INF;
+      if ($iVal >= $iRadix) 
+        break;
+      ++$this->iPos;
+      $iTotal = $iTotal * $iRadix + $iVal;
     }
-    if ($this->pos === start || len != null && $this->pos - start !== len) return null
+    if ($this->iPos === $iStart || $iLen != null && $this->iPos - $iStart !== $iLen) 
+      return null;
 
-    return total
+    return $iTotal;
   }
 
-  pp.readRadixNumber = function(radix) {
-    $this->pos += 2 // 0x
-    let val = $this->readInt(radix)
-    if (val == null) $this->raise($this->start + 2, "Expected number in radix " + radix)
-    if (isIdentifierStart($this->fullCharCodeAtPos())) $this->raise($this->pos, "Identifier directly after number")
-    return $this->finishToken(tt.num, val)
+  public function fnReadRadixNumber($iRadix) 
+  {
+    $this->iPos += 2; // 0x
+    $iVal = $this->fnReadInt($iRadix);
+    
+    if (is_null($iVal)) 
+      $this->fnRaise($this->iStart + 2, "Expected number in radix " . $iRadix);
+    if (Identifier::fnIsIdentifierStart($this->fullCharCodeAtPos())) 
+      $this->fnRaise($this->iPos, "Identifier directly after number");
+    
+    return $this->fnFinishToken(TokenTypes::$aTypes['num'], $iVal);
   }
 
   // Read an integer, octal integer, or floating-point number.
 
-  pp.readNumber = function(startsWithDot) {
-    let start = $this->pos
-    if (!startsWithDot && $this->readInt(10) === null) $this->raise(start, "Invalid number")
-    let octal = $this->pos - start >= 2 && $this->input.charCodeAt(start) === 48
-    if (octal && $this->strict) $this->raise(start, "Invalid number")
-    if (octal && /[89]/.test($this->input.slice(start, $this->pos))) octal = false
-    let next = $this->input.charCodeAt($this->pos)
-    if (next === 46 && !octal) { // '.'
-      ++$this->pos
-      $this->readInt(10)
-      next = $this->input.charCodeAt($this->pos)
+  public function fnReadNumber($bStartsWithDot) 
+  {
+    $iStart = $this->iPos;
+    if (!$bStartsWithDot && $this->fnReadInt(10) === null) 
+      $this->fnRaise($iStart, "Invalid number");
+    $bOctal = ($this->iPos - $iStart) >= 2
+      && Utilities::fnGetCharAt($this->sInput, $iStart) === 48;
+    if ($bOctal && $this->bStrict) 
+      $this->fnRaise($iStart, "Invalid number");
+    if ($bOctal 
+        && preg_match(
+          "/[89]/", 
+          mb_substr(
+            $this->sInput, 
+            $iStart, 
+            $this->iPos - $iStart
+          )
+        )
+       ) 
+      $bOctal = false;
+    $iNext = Utilities::fnGetCharAt($this->sInput, $this->iPos);
+    if ($iNext === 46 && !$bOctal) { // '.'
+      ++$this->iPos;
+      $this->fnReadInt(10);
+      $iNext = Utilities::fnGetCharAt($this->sInput, $this->iPos);
     }
-    if ((next === 69 || next === 101) && !octal) { // 'eE'
-      next = $this->input.charCodeAt(++$this->pos)
-      if (next === 43 || next === 45) ++$this->pos // '+-'
-      if ($this->readInt(10) === null) $this->raise(start, "Invalid number")
+    if (($iNext === 69 || $iNext === 101) && !$bOctal) { // 'eE'
+      $iNext = Utilities::fnGetCharAt($this->sInput, ++$this->iPos);
+      if ($iNext === 43 || $iNext === 45) 
+        ++$this->iPos; // '+-'
+      if ($this->fnReadInt(10) === null) 
+        $this->fnRaise($iStart, "Invalid number");
     }
-    if (isIdentifierStart($this->fullCharCodeAtPos())) $this->raise($this->pos, "Identifier directly after number")
+    if (Identifier::fnIsIdentifierStart($this->fnFullCharCodeAtPos())) 
+      $this->fnRaise($this->iPos, "Identifier directly after number");
 
-    let str = $this->input.slice(start, $this->pos)
-    let val = octal ? parseInt(str, 8) : parseFloat(str)
-    return $this->finishToken(tt.num, val)
+    $sStr = mb_substr($this->sInput, $iStart, $this->iPos - $iStart);
+    $iVal = $bOctal ? intval($sStr, 8) : floatval($sStr);
+    return $this->fnFinishToken(TokenTypes::$aTypes['num'], $iVal);
   }
 
   // Read a string value, interpreting backslash-escapes.
 
-  pp.readCodePoint = function() {
-    let ch = $this->input.charCodeAt($this->pos), code
+  public function fnReadCodePoint() 
+  {
+    $iCh = Utilities::fnGetCharAt($this->sInput, $this->iPos);
+    $iCode;
 
-    if (ch === 123) { // '{'
-      if ($this->options.ecmaVersion < 6) $this->unexpected()
-      let codePos = ++$this->pos
-      code = $this->readHexChar($this->input.indexOf("}", $this->pos) - $this->pos)
-      ++$this->pos
-      if (code > 0x10FFFF) $this->invalidStringToken(codePos, "Code point out of bounds")
+    if ($iCh === 123) { // '{'
+      if ($this->aOptions['ecmaVersion'] < 6) 
+        $this->fnUnexpected();
+      $iCodePos = ++$this->iPos;
+      $iCode = $this->fnReadHexChar(mb_strpos($this->sInput, "}", $this->iPos) - $this->iPos);
+      ++$this->iPos;
+      if ($iCode > 0x10FFFF) 
+        $this->fnInvalidStringToken($iCodePos, "Code point out of bounds");
     } else {
-      code = $this->readHexChar(4)
+      $iCode = $this->fnReadHexChar(4);
     }
-    return code
+    return $iCode;
   }
 
-  function codePointToString(code) {
-    // UTF-16 Decoding
-    if (code <= 0xFFFF) return String.fromCharCode(code)
-    code -= 0x10000
-    return String.fromCharCode((code >> 10) + 0xD800, (code & 1023) + 0xDC00)
-  }
-
-  pp.readString = function(quote) {
-    let out = "", chunkStart = ++$this->pos
+  public function fnReadString($iQuote) 
+  {
+    $sOut = "";
+    $iChunkStart = ++$this->iPos;
+    
     for (;;) {
-      if ($this->pos >= $this->input.length) $this->raise($this->start, "Unterminated string constant")
-      let ch = $this->input.charCodeAt($this->pos)
-      if (ch === quote) break
-      if (ch === 92) { // '\'
-        out += $this->input.slice(chunkStart, $this->pos)
-        out += $this->readEscapedChar(false)
-        chunkStart = $this->pos
+      if ($this->iPos >= mb_strlen($this->sInput))
+        $this->fnRaise($this->iStart, "Unterminated string constant");
+      $iCh = Utilities::fnGetCharAt($this->sInput, $this->iPos);
+      if ($iCh === $iQuote) 
+        break;
+      if ($iCh === 92) { // '\'
+        $sOut .= mb_substr($this->sInput, $iChunkStart, $this->iPos - $iChunkStart);
+        $sOut .= $this->fnReadEscapedChar(false);
+        $iChunkStart = $this->iPos;
       } else {
-        if (isNewLine(ch, $this->options.ecmaVersion >= 10)) $this->raise($this->start, "Unterminated string constant")
-        ++$this->pos
+        if (Whitespace::fnIsNewLine($iCh, $this->aOptions['ecmaVersion'] >= 10)) 
+          $this->fnRaise($this->iStart, "Unterminated string constant");
+        ++$this->iPos;
       }
     }
-    out += $this->input.slice(chunkStart, $this->pos++)
-    return $this->finishToken(tt.string, out)
+    
+    $sOut .= mb_substr($this->sInput, $iChunkStart, $this->iPos++ - $iChunkStart);
+    
+    return $this->fnFinishToken(TokenTypes::$aTypes['string'], $sOut);
   }
 
   // Reads template string tokens.
 
-  const INVALID_TEMPLATE_ESCAPE_ERROR = {}
-
-  pp.tryReadTemplateToken = function() {
-    $this->inTemplateElement = true
+  public function fnTryReadTemplateToken() 
+  {
+    $this->bInTemplateElement = true;
+    
     try {
-      $this->readTmplToken()
-    } catch (err) {
-      if (err === INVALID_TEMPLATE_ESCAPE_ERROR) {
-        $this->readInvalidTemplateToken()
-      } else {
-        throw err
-      }
+      $this->fnReadTmplToken();
+    } catch (InvalidTemplateEscapeError $oException) {
+      $this->fnReadInvalidTemplateToken();
     }
 
-    $this->inTemplateElement = false
+    $this->bInTemplateElement = false;
   }
 
-  pp.invalidStringToken = function(position, message) {
-    if ($this->inTemplateElement && $this->options.ecmaVersion >= 9) {
-      throw INVALID_TEMPLATE_ESCAPE_ERROR
+  public function fnInvalidStringToken($iPosition, $sMessage) 
+  {
+    if ($this->bInTemplateElement && $this->aOptions['ecmaVersion'] >= 9) {
+      throw new InvalidTemplateEscapeError();
     } else {
-      $this->raise(position, message)
+      $this->fnRaise($iPosition, $sMessage);
     }
   }
 
-  pp.readTmplToken = function() {
-    let out = "", chunkStart = $this->pos
+  public function fnReadTmplToken() 
+  {
+    $sOut = "";
+    $iChunkStart = $this->iPos;
+    
     for (;;) {
-      if ($this->pos >= $this->input.length) $this->raise($this->start, "Unterminated template")
-      let ch = $this->input.charCodeAt($this->pos)
-      if (ch === 96 || ch === 36 && $this->input.charCodeAt($this->pos + 1) === 123) { // '`', '${'
-        if ($this->pos === $this->start && ($this->type === tt.template || $this->type === tt.invalidTemplate)) {
+      if ($this->iPos >= mb_strlen($this->sInput)) 
+        $this->fnRaise($this->iStart, "Unterminated template");
+      
+      let ch = $this->input.charCodeAt($this->iPos)
+      if (ch === 96 || ch === 36 && $this->input.charCodeAt($this->iPos + 1) === 123) { // '`', '${'
+        if ($this->iPos === $this->iStart && ($this->type === TokenTypes::$aTypes['template'] || $this->type === TokenTypes::$aTypes['invalidTemplate'])) {
           if (ch === 36) {
-            $this->pos += 2
-            return $this->finishToken(tt.dollarBraceL)
+            $this->iPos += 2
+            return $this->fnFinishToken(TokenTypes::$aTypes['dollarBraceL']);
           } else {
-            ++$this->pos
-            return $this->finishToken(tt.backQuote)
+            ++$this->iPos
+            return $this->fnFinishToken(TokenTypes::$aTypes['backQuote']);
           }
         }
-        out += $this->input.slice(chunkStart, $this->pos)
-        return $this->finishToken(tt.template, out)
+        out += $this->input.slice(chunkStart, $this->iPos)
+        return $this->fnFinishToken(TokenTypes::$aTypes['template'], out)
       }
       if (ch === 92) { // '\'
-        out += $this->input.slice(chunkStart, $this->pos)
-        out += $this->readEscapedChar(true)
-        chunkStart = $this->pos
-      } else if (isNewLine(ch)) {
-        out += $this->input.slice(chunkStart, $this->pos)
-        ++$this->pos
+        out += $this->input.slice(chunkStart, $this->iPos)
+        out += $this->fnReadEscapedChar(true)
+        chunkStart = $this->iPos
+      } else if (Whitespace::fnIsNewLine(ch)) {
+        out += $this->input.slice(chunkStart, $this->iPos)
+        ++$this->iPos
         switch (ch) {
         case 13:
-          if ($this->input.charCodeAt($this->pos) === 10) ++$this->pos
+          if ($this->input.charCodeAt($this->iPos) === 10) ++$this->iPos
         case 10:
           out += "\n"
           break
@@ -1041,71 +1133,71 @@ class Parser
           out += String.fromCharCode(ch)
           break
         }
-        if ($this->options.locations) {
+        if ($this->aOptions.locations) {
           ++$this->curLine
-          $this->lineStart = $this->pos
+          $this->lineStart = $this->iPos
         }
-        chunkStart = $this->pos
+        chunkStart = $this->iPos
       } else {
-        ++$this->pos
+        ++$this->iPos
       }
     }
   }
 
   // Reads a template token to search for the end, without validating any escape sequences
   pp.readInvalidTemplateToken = function() {
-    for (; $this->pos < $this->input.length; $this->pos++) {
-      switch ($this->input[$this->pos]) {
+    for (; $this->iPos < mb_strlen($this->sInput); $this->iPos++) {
+      switch ($this->input[$this->iPos]) {
       case "\\":
-        ++$this->pos
+        ++$this->iPos
         break
 
       case "$":
-        if ($this->input[$this->pos + 1] !== "{") {
+        if ($this->input[$this->iPos + 1] !== "{") {
           break
         }
       // falls through
 
       case "`":
-        return $this->finishToken(tt.invalidTemplate, $this->input.slice($this->start, $this->pos))
+        return $this->fnFinishToken(TokenTypes::$aTypes['invalidTemplate'], $this->input.slice($this->iStart, $this->iPos))
 
       // no default
       }
     }
-    $this->raise($this->start, "Unterminated template")
+    $this->fnRaise($this->iStart, "Unterminated template")
   }
 
   // Used to read escaped characters
 
   pp.readEscapedChar = function(inTemplate) {
-    let ch = $this->input.charCodeAt(++$this->pos)
-    ++$this->pos
+    let ch = $this->input.charCodeAt(++$this->iPos)
+    ++$this->iPos
     switch (ch) {
     case 110: return "\n" // 'n' -> '\n'
     case 114: return "\r" // 'r' -> '\r'
-    case 120: return String.fromCharCode($this->readHexChar(2)) // 'x'
+    case 120: return String.fromCharCode($this->fnReadHexChar(2)) // 'x'
     case 117: return codePointToString($this->readCodePoint()) // 'u'
     case 116: return "\t" // 't' -> '\t'
     case 98: return "\b" // 'b' -> '\b'
     case 118: return "\u000b" // 'v' -> '\u000b'
     case 102: return "\f" // 'f' -> '\f'
-    case 13: if ($this->input.charCodeAt($this->pos) === 10) ++$this->pos // '\r\n'
+    case 13: if ($this->input.charCodeAt($this->iPos) === 10) ++$this->iPos // '\r\n'
     case 10: // ' \n'
-      if ($this->options.locations) { $this->lineStart = $this->pos; ++$this->curLine }
+      if ($this->aOptions.locations) { $this->lineStart = $this->iPos; ++$this->curLine }
       return ""
     default:
       if (ch >= 48 && ch <= 55) {
-        let octalStr = $this->input.substr($this->pos - 1, 3).match(/^[0-7]+/)[0]
+        let octalStr = $this->input.substr($this->iPos - 1, 3).match(/^[0-7]+/)[0]
         let octal = parseInt(octalStr, 8)
         if (octal > 255) {
           octalStr = octalStr.slice(0, -1)
           octal = parseInt(octalStr, 8)
         }
-        $this->pos += octalStr.length - 1
-        ch = $this->input.charCodeAt($this->pos)
-        if ((octalStr !== "0" || ch === 56 || ch === 57) && ($this->strict || inTemplate)) {
+        $this->iPos += octalStr.length - 1
+        ch = $this->input.charCodeAt($this->iPos)
+        if ((octalStr !== "0" || ch === 56 || ch === 57) && ($this->bStrict || inTemplate)) {
           $this->invalidStringToken(
-            $this->pos - 1 - octalStr.length,
+            $this->iPos - 1 - octalStr.length,
             inTemplate
               ? "Octal literal in template string"
               : "Octal literal in strict mode"
@@ -1120,8 +1212,8 @@ class Parser
   // Used to read character escape sequences ('\x', '\u', '\U').
 
   pp.readHexChar = function(len) {
-    let codePos = $this->pos
-    let n = $this->readInt(16, len)
+    let codePos = $this->iPos
+    let n = $this->fnReadInt(16, len)
     if (n === null) $this->invalidStringToken(codePos, "Bad character escape sequence")
     return n
   }
@@ -1134,30 +1226,30 @@ class Parser
 
   pp.readWord1 = function() {
     $this->containsEsc = false
-    let word = "", first = true, chunkStart = $this->pos
-    let astral = $this->options.ecmaVersion >= 6
-    while ($this->pos < $this->input.length) {
+    let word = "", first = true, chunkStart = $this->iPos
+    let astral = $this->aOptions.ecmaVersion >= 6
+    while ($this->iPos < mb_strlen($this->sInput)) {
       let ch = $this->fullCharCodeAtPos()
       if (isIdentifierChar(ch, astral)) {
-        $this->pos += ch <= 0xffff ? 1 : 2
+        $this->iPos += ch <= 0xffff ? 1 : 2
       } else if (ch === 92) { // "\"
         $this->containsEsc = true
-        word += $this->input.slice(chunkStart, $this->pos)
-        let escStart = $this->pos
-        if ($this->input.charCodeAt(++$this->pos) !== 117) // "u"
-          $this->invalidStringToken($this->pos, "Expecting Unicode escape sequence \\uXXXX")
-        ++$this->pos
+        word += $this->input.slice(chunkStart, $this->iPos)
+        let escStart = $this->iPos
+        if ($this->input.charCodeAt(++$this->iPos) !== 117) // "u"
+          $this->invalidStringToken($this->iPos, "Expecting Unicode escape sequence \\uXXXX")
+        ++$this->iPos
         let esc = $this->readCodePoint()
         if (!(first ? isIdentifierStart : isIdentifierChar)(esc, astral))
           $this->invalidStringToken(escStart, "Invalid Unicode escape")
         word += codePointToString(esc)
-        chunkStart = $this->pos
+        chunkStart = $this->iPos
       } else {
         break
       }
       first = false
     }
-    return word + $this->input.slice(chunkStart, $this->pos)
+    return word + $this->input.slice(chunkStart, $this->iPos)
   }
 
   // Read an identifier or keyword token. Will check for reserved
@@ -1165,12 +1257,12 @@ class Parser
 
   pp.readWord = function() {
     let word = $this->readWord1()
-    let type = tt.name
+    let type = TokenTypes::$aTypes['name']
     if ($this->keywords.test(word)) {
-      if ($this->containsEsc) $this->raiseRecoverable($this->start, "Escape sequence in keyword " + word)
+      if ($this->containsEsc) $this->fnRaiseRecoverable($this->iStart, "Escape sequence in keyword " + word)
       type = keywordTypes[word]
     }
-    return $this->finishToken(type, word)
+    return $this->fnFinishToken(type, word)
   }
   
   

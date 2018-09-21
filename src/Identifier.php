@@ -69,7 +69,7 @@ class Identifier
 
   // Test whether a given character code starts an identifier.
 
-  public static function fnIsIdentifierStart($iCode, $bAstral) 
+  public static function fnIsIdentifierStart($iCode, $bAstral=false) 
   {
     if ($iCode < 65) 
       return $iCode === 36;
@@ -92,7 +92,7 @@ class Identifier
 
   // Test whether a given character is part of an identifier.
 
-  public static function fnIsIdentifierChar($iCode, $bAstral) 
+  public static function fnIsIdentifierChar($iCode, $bAstral=false) 
   {
     if ($iCode < 48) 
       return $iCode === 36;
