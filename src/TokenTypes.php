@@ -3,6 +3,7 @@
 namespace libJSTranspiler;
 
 use libJSTranspiler\TokenType;
+use libJSTranspiler\TokenContextTypes;
 
 class TokenTypes
 {
@@ -157,3 +158,119 @@ TokenTypes::fnAddArray([
 foreach (TokenTypes::$aKeywords as $sKeyword => &$oReference) {
   $oReference = TokenTypes::$aTypes[$sKeyword];
 }
+
+TokenTypes::$aTypes['parenR']->fnUpdateContext = 
+TokenTypes::$aTypes['braceR']->fnUpdateContext = 
+function() 
+{
+  if (count($this->aContext) === 1) {
+    $this->bExprAllowed = true;
+    return;
+  }
+  $oOut = array_pop($this->aContext);
+  if ($oOut === TokenContextTypes::$aTypes['b_stat'] 
+      && $this->fnCurContext()->sToken === "function") {
+    $oOut = array_pop($this->aContext);
+  }
+  $this->bExprAllowed = !$oOut->bIsExpr;
+};
+
+TokenTypes::$aTypes['braceL']->fnUpdateContext = function($oPrevType) 
+{
+  array_push(
+    $this->aContext, 
+    $this->fnBraceIsBlock($oPrevType) ? 
+      TokenContextTypes::$aTypes['b_stat'] :
+      TokenContextTypes::$aTypes['b_expr']
+  );
+  $this->bExprAllowed = true;
+};
+
+TokenTypes::$aTypes['dollarBraceL']->fnUpdateContext = function() 
+{
+  array_push(
+    $this->aContext,
+    TokenContextTypes::$aTypes['b_tmpl']
+  );
+  $this->bExprAllowed = true;
+};
+
+TokenTypes::$aTypes['parenL']->fnUpdateContext = function($oPrevType) 
+{
+  $bStatementParens = $oPrevType === TokenTypes::$aTypes['if']
+    || $oPrevType === TokenTypes::$aTypes['for']
+    || $oPrevType === TokenTypes::$aTypes['with']
+    || $oPrevType === TokenTypes::$aTypes['while'];
+  array_push(
+    $this->aContext,
+    $bStatementParens ?
+    TokenContextTypes::$aTypes['p_stat'] :
+    TokenContextTypes::$aTypes['p_expr']
+  );
+  $this->bExprAllowed = true;
+};
+
+TokenTypes::$aTypes['incDec']->fnUpdateContext = function() 
+{
+  // tokExprAllowed stays unchanged
+};
+
+TokenTypes::$aTypes['function']->fnUpdateContext = 
+TokenTypes::$aTypes['class']->fnUpdateContext = 
+function($oPrevType) 
+{
+  if ($oPrevType->bBeforeExpr 
+      && $oPrevType !== TokenTypes::$aTypes['semi'] 
+      && $oPrevType !== TokenTypes::$aTypes['else']
+      &&
+        !(($oPrevType === TokenTypes::$aTypes['colon'] 
+            || $oPrevType === TokenTypes::$aTypes['braceL']) 
+          && $this->fnCurContext() === TokenContextTypes::$aTypes['b_stat']))
+    array_push(
+      $this->aContext,
+      TokenContextTypes::$aTypes['f_expr']
+    );
+  else
+    array_push(
+      $this->aContext,
+      TokenContextTypes::$aTypes['f_stat']
+    );
+  $this->bExprAllowed = false;
+};
+
+TokenTypes::$aTypes['backQuote']->fnUpdateContext = function() 
+{
+  if ($this->fnCurContext() === TokenContextTypes::$aTypes['q_tmpl'])
+    array_pop($this->aContext);
+  else
+    array_push(
+      $this->aContext,
+      TokenContextTypes::$aTypes['q_tmpl']
+    );
+  $this->bExprAllowed = false;
+};
+
+TokenTypes::$aTypes['star']->fnUpdateContext = function($oPrevType) 
+{
+  if ($oPrevType === TokenTypes::$aTypes['function']) {
+    $iIndex = count($this->aContext) - 1;
+    if ($this->aContext[$iIndex] === TokenContextTypes::$aTypes['f_expr'])
+      $this->aContext[$iIndex] = TokenContextTypes::$aTypes['f_expr_gen'];
+    else
+      $this->aContext[$iIndex] = TokenContextTypes::$aTypes['f_gen'];
+  }
+  $this->bExprAllowed = true;
+};
+
+TokenTypes::$aTypes['name']->fnUpdateContext = function($oPrevType) 
+{
+  $bAllowed = false;
+  if ($this->aOptions['ecmaVersion'] >= 6 
+      && $oPrevType !== TokenTypes::$aTypes['dot']) {
+    if ($this->mValue === "of" && !$this->bExprAllowed ||
+        $this->mValue === "yield" && $this->fnInGeneratorContext())
+      $bAllowed = true;
+  }
+  $this->bExprAllowed = $bAllowed;
+};
+

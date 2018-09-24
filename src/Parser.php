@@ -9,6 +9,7 @@ use libJSTranspiler\TokenTypes;
 use libJSTranspiler\Identifier;
 use libJSTranspiler\Whitespace;
 use libJSTranspiler\TokenContext;
+use libJSTranspiler\TokenContextTypes;
 use libJSTranspiler\Utilities;
 use libJSTranspiler\Scope;
 use Closure;
@@ -259,7 +260,65 @@ class Parser
     // For RegExp validation
     $this->regexpState = null;
   }
-  
+
+  public function fnInitialContext() 
+  {
+    return [TokenContextTypes::$aTypes['b_stat']];
+  }
+
+  public function fnBraceIsBlock($oPrevType) 
+  {
+    $oParent = $this->fnCurContext();
+    if ($oParent === TokenContextTypes::$aTypes['f_expr'] 
+        || $oParent === TokenContextTypes::$aTypes['f_stat'])
+      return true;
+    if ($oPrevType === TokenTypes::$aTypes['colon']
+        && ($oParent === TokenContextTypes::$aTypes['b_stat'] 
+            || $oParent === TokenContextTypes::$aTypes['b_expr']))
+      return !$oParent->bIsExpr;
+
+    // The check for `tt.name && exprAllowed` detects whether we are
+    // after a `yield` or `of` construct. See the `updateContext` for
+    // `tt.name`.
+    if ($oPrevType === TokenTypes::$aTypes['return'] 
+        || $oPrevType === TokenTypes::$aTypes['name']
+        && $this->bExprAllowed)
+      return preg_match(Whitespace::lineBreak, mb_substr($this->sInput, $this->iLastTokEnd, $this->iStart));
+    if ($oPrevType === TokenTypes::$aTypes['else']
+        || $oPrevType === TokenTypes::$aTypes['semi'] 
+        || $oPrevType === TokenTypes::$aTypes['eof'] 
+        || $oPrevType === TokenTypes::$aTypes['parenR'] 
+        || $oPrevType === TokenTypes::$aTypes['arrow'])
+      return true;
+    if ($oPrevType === TokenTypes::$aTypes['braceL'])
+      return $oParent === TokenContextTypes::$aTypes['b_stat'];
+    if ($oPrevType === TokenTypes::$aTypes['var']
+        || $oPrevType === TokenTypes::$aTypes['name'])
+      return false;
+    return !$this->bExprAllowed;
+  }
+
+  public function fnInGeneratorContext() {
+    for ($iI = count($this->aContext) - 1; $iI >= 1; $iI--) {
+      $oContext = $this->aContext[$iI];
+      if ($oContext->sToken === "function")
+        return $oContext->bGenerator;
+    }
+    return false;
+  }
+
+  public function fnUpdateContext($oPrevType) {
+    $fnUpdate;
+    $oType = $this->oType;
+    if ($oType->sKeyword && $oPrevType === TokenTypes::$aTypes['dot'])
+      $this->bExprAllowed = false;
+    else if ($fnUpdate = $oType->fnUpdateContext) {
+      $fnUpdate = Closure::bind($fnUpdate, $this);
+      $fnUpdate($oPrevType);
+    } else
+      $this->bExprAllowed = $oType->bBeforeExpr;
+  }
+
   public function fnEnterScope($iFlags) 
   {
     array_push($this->aScopeStack, new Scope($iFlags));
@@ -1288,11 +1347,6 @@ class Parser
   public function inAsync() 
   {
     return ($this->fnCurrentVarScope()->iFlags & Scope::SCOPE_ASYNC) > 0;
-  }
-  
-  public function fnInitialContext()
-  {
-    return [TokenContextTypes::$aTypes['b_stat']];
   }
   
   public function fnCurPosition()
