@@ -13,6 +13,37 @@ class Node
   public $oLoc;
   public $sSourceFile;
   public $aRange;
+  public $sSourceType;
+  public $oLabel;
+  public $oTest;
+  public $bAwait;
+  public $aBody;
+  public $oConsequent;
+  public $oAlternate;
+  public $oArgument;
+  public $oDiscriminant;
+  public $oBlock;
+  public $oHandler;
+  public $oFinalizer;
+  public $oParam;
+  public $oObject;
+  public $oExpression;
+  public $oInit;
+  public $oUpdate;
+  public $aCases;
+  public $oLeft;
+  public $oRight;
+  public $aDeclarations;
+  public $oId;
+  public $sKind;
+  public $bGenerator;
+  public $bAsync;
+  public $bStatic;
+  public $oKey;
+  public $bComputed;
+  public $sValue;
+  public $oValue;
+  public $bSuperClass;
           
   public function __construct($oParser, $iPos, $oLoc)
   {
