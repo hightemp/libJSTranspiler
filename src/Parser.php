@@ -1065,208 +1065,225 @@ class Parser
 
   // Parses module export declaration.
 
-  public function fnParseExport(node, exports)
+  public function fnParseExport(&$oNode, &$aExports)
   {
-    $this->fnNext()
+    $this->fnNext();
     // export * from '...'
     if ($this->fnEat(TokenTypes::$aTypes['star'])) {
-      $this->fnExpectContextual("from")
-      if ($this->oType !== TokenTypes::$aTypes['string']) $this->fnUnexpected()
-      node.source = $this->parseExprAtom()
-      $this->fnSemicolon()
-      return $this->fnFinishNode(node, "ExportAllDeclaration")
+      $this->fnExpectContextual("from");
+      if ($this->oType !== TokenTypes::$aTypes['string']) 
+        $this->fnUnexpected();
+      $oNode->oSource = $this->fnParseExprAtom();
+      $this->fnSemicolon();
+      return $this->fnFinishNode($oNode, "ExportAllDeclaration");
     }
     if ($this->fnEat(TokenTypes::$aTypes['default'])) { // export default ...
-      $this->checkExport(exports, "default", $this->lastTokStart)
-      let isAsync
-      if ($this->oType === TokenTypes::$aTypes['function'] || (isAsync = $this->isAsyncFunction())) {
-        let fNode = $this->fnStartNode()
-        $this->fnNext()
-        if (isAsync) $this->fnNext()
-        node.declaration = $this->parseFunction(fNode, FUNC_STATEMENT | FUNC_NULLABLE_ID, false, isAsync, true)
+      $this->fnCheckExport(exports, "default", $this->lastTokStart);
+      $bIsAsync;
+      if ($this->oType === TokenTypes::$aTypes['function'] 
+          || ($bIsAsync = $this->fnIsAsyncFunction())) {
+        $oFNode = $this->fnStartNode();
+        $this->fnNext();
+        if ($bIsAsync) 
+          $this->fnNext();
+        $oNode->oDeclaration = $this->fnParseFunction($oFNode, self::FUNC_STATEMENT | self::FUNC_NULLABLE_ID, false, $bIsAsync, true);
       } else if ($this->oType === TokenTypes::$aTypes['class']) {
-        let cNode = $this->fnStartNode()
-        node.declaration = $this->parseClass(cNode, "nullableID")
+        $oCNode = $this->fnStartNode();
+        $oNode->oDeclaration = $this->fnParseClass($oCNode, "nullableID");
       } else {
-        node.declaration = $this->fnParseMaybeAssign()
-        $this->fnSemicolon()
+        $oNode->oDeclaration = $this->fnParseMaybeAssign();
+        $this->fnSemicolon();
       }
-      return $this->fnFinishNode(node, "ExportDefaultDeclaration")
+      return $this->fnFinishNode($oNode, "ExportDefaultDeclaration");
     }
     // export var|const|let|function|class ...
     if ($this->shouldParseExportStatement()) {
-      node.declaration = $this->fnParseStatement(null)
-      if (node.declaration.type === "VariableDeclaration")
-        $this->checkVariableExport(exports, node.declaration.declarations)
+      $oNode->oDeclaration = $this->fnParseStatement(null);
+      if ($oNode->oDeclaration->sType === "VariableDeclaration")
+        $this->fnCheckVariableExport($aExports, $oNode->oDeclaration->aDeclarations);
       else
-        $this->checkExport(exports, node.declaration.id.name, node.declaration.id.start)
-      node.specifiers = []
-      node.source = null
+        $this->fnCheckExport($aExports, $oNode->oDeclaration->oId->sName, $oNode->oDeclaration->oId->iStart);
+      $oNode->oSpecifiers = [];
+      $oNode->oSource = null;
     } else { // export { x, y as z } [from '...']
-      node.declaration = null
-      node.specifiers = $this->parseExportSpecifiers(exports)
+      $oNode->oDeclaration = null;
+      $oNode->oSpecifiers = $this->fnParseExportSpecifiers($aExports);
       if ($this->fnEatContextual("from")) {
-        if ($this->oType !== TokenTypes::$aTypes['string']) $this->fnUnexpected()
-        node.source = $this->parseExprAtom()
+        if ($this->oType !== TokenTypes::$aTypes['string']) 
+          $this->fnUnexpected();
+        $oNode->oSource = $this->fnParseExprAtom();
       } else {
         // check for keywords used as local names
-        for (let spec of node.specifiers) {
-          $this->checkUnreserved(spec.local)
+        //for (let spec of node.specifiers) {
+        foreach ($oNode->oSpecifiers as $oSpec) {
+          $this->fnCheckUnreserved($oSpec->local);
         }
 
-        node.source = null
+        $oNode->oSource = null;
       }
-      $this->fnSemicolon()
+      $this->fnSemicolon();
     }
-    return $this->fnFinishNode(node, "ExportNamedDeclaration")
+    return $this->fnFinishNode($oNode, "ExportNamedDeclaration");
   }
 
-  public function checkExport(exports, name, pos)
+  public function fnCheckExport(&$aExports, $sName, $iPos)
   {
-    if (!exports) return
-    if (has(exports, name))
-      $this->fnRaiseRecoverable(pos, "Duplicate export '" + name + "'")
-    exports[name] = true
+    if (!$aExports) 
+      return;
+    if (isset($aExports[$sName]))
+      $this->fnRaiseRecoverable($iPos, "Duplicate export '$sName'");
+    $aExports[$sName] = true;
   }
 
-  public function checkPatternExport(exports, pat)
+  public function fnCheckPatternExport(&$aExports, $oPat)
   {
-    let type = pat.type
-    if (type === "Identifier")
-      $this->checkExport(exports, pat.name, pat.start)
-    else if (type === "ObjectPattern")
-      for (let prop of pat.properties)
-        $this->checkPatternExport(exports, prop)
-    else if (type === "ArrayPattern")
-      for (let elt of pat.elements) {
-        if (elt) $this->checkPatternExport(exports, elt)
+    $sType = $oPat->sType;
+    if ($sType === "Identifier")
+      $this->fnCheckExport($aExports, $oPat->sName, $oPat->iStart);
+    else if ($sType === "ObjectPattern")
+      foreach ($oPat->aProperties as $oProp) {
+        $this->fnCheckPatternExport($aExports, $oProp);
       }
-    else if (type === "Property")
-      $this->checkPatternExport(exports, pat.value)
-    else if (type === "AssignmentPattern")
-      $this->checkPatternExport(exports, pat.left)
-    else if (type === "RestElement")
-      $this->checkPatternExport(exports, pat.argument)
-    else if (type === "ParenthesizedExpression")
-      $this->checkPatternExport(exports, pat.expression)
+    else if ($sType === "ArrayPattern")
+      foreach ($oPat->aElements as $oElt) {
+        if ($oElt) 
+          $this->fnCheckPatternExport($aExports, $oElt);
+      }
+    else if ($sType === "Property")
+      $this->fnCheckPatternExport($aExports, $oPat->oValue);
+    else if ($sType === "AssignmentPattern")
+      $this->fnCheckPatternExport($aExports, $oPat->oLeft);
+    else if ($sType === "RestElement")
+      $this->fnCheckPatternExport($aExports, $oPat->oArgument);
+    else if ($sType === "ParenthesizedExpression")
+      $this->fnCheckPatternExport($aExports, $oPat->oExpression);
   }
 
-  public function checkVariableExport(exports, decls)
+  public function fnCheckVariableExport(&$aExports, $aDecls)
   {
-    if (!exports) return
-    for (let decl of decls)
-      $this->checkPatternExport(exports, decl.id)
+    if (!$aExports) 
+      return;
+    foreach ($aDecls as $oDecl)
+      $this->fnCheckPatternExport($aExports, $oDecl->oId);
   }
 
-  public function shouldParseExportStatement()
+  public function fnShouldParseExportStatement()
   {
-    return $this->oType.keyword === "var" ||
-      $this->oType.keyword === "const" ||
-      $this->oType.keyword === "class" ||
-      $this->oType.keyword === "function" ||
-      $this->isLet() ||
-      $this->isAsyncFunction()
+    return $this->oType->sKeyword === "var" ||
+      $this->oType->sKeyword === "const" ||
+      $this->oType->sKeyword === "class" ||
+      $this->oType->sKeyword === "function" ||
+      $this->fnIsLet() ||
+      $this->fnIsAsyncFunction();
   }
 
   // Parses a comma-separated list of module exports.
 
-  public function parseExportSpecifiers(exports)
+  public function fnParseExportSpecifiers(&$aExports)
   {
-    let nodes = [], first = true
+    $aNodes = [];
+    $bFirst = true;
     // export { x, y as z } [from '...']
-    $this->fnExpect(TokenTypes::$aTypes['braceL'])
+    $this->fnExpect(TokenTypes::$aTypes['braceL']);
     while (!$this->fnEat(TokenTypes::$aTypes['braceR'])) {
-      if (!first) {
-        $this->fnExpect(TokenTypes::$aTypes['comma'])
-        if ($this->afterTrailingComma(TokenTypes::$aTypes['braceR'])) break
-      } else first = false
+      if (!$bFirst) {
+        $this->fnExpect(TokenTypes::$aTypes['comma']);
+        if ($this->fnAfterTrailingComma(TokenTypes::$aTypes['braceR'])) 
+          break;
+      } else 
+        $bFirst = false;
 
-      let node = $this->fnStartNode()
-      node.local = $this->fnParseIdent(true)
-      node.exported = $this->fnEatContextual("as") ? $this->fnParseIdent(true) : node.local
-      $this->checkExport(exports, node.exported.name, node.exported.start)
-      nodes.push($this->fnFinishNode(node, "ExportSpecifier"))
+      $oNode = $this->fnStartNode();
+      $oNode->oLocal = $this->fnParseIdent(true);
+      $oNode->oExported = $this->fnEatContextual("as") ? $this->fnParseIdent(true) : $oNode->oLocal;
+      $this->fnCheckExport($aExports, $oNode->oExported->sName, $oNode->oExported->iStart);
+      array_push($aNodes, $this->fnFinishNode($oNode, "ExportSpecifier"));
     }
-    return nodes
+    return $aNodes;
   }
 
   // Parses import declaration.
 
-  public function parseImport(node)
+  public function fnParseImport(&$oNode)
   {
-    $this->fnNext()
+    $this->fnNext();
     // import '...'
     if ($this->oType === TokenTypes::$aTypes['string']) {
-      node.specifiers = empty
-      node.source = $this->parseExprAtom()
+      $oNode->oSpecifiers = [];
+      $oNode->oSource = $this->fnParseExprAtom();
     } else {
-      node.specifiers = $this->parseImportSpecifiers()
-      $this->fnExpectContextual("from")
-      node.source = $this->oType === TokenTypes::$aTypes['string'] ? $this->parseExprAtom() : $this->fnUnexpected()
+      $oNode->oSpecifiers = $this->fnParseImportSpecifiers();
+      $this->fnExpectContextual("from");
+      $oNode->oSource = $this->oType === TokenTypes::$aTypes['string'] ? $this->fnParseExprAtom() : $this->fnUnexpected();
     }
-    $this->fnSemicolon()
-    return $this->fnFinishNode(node, "ImportDeclaration")
+    $this->fnSemicolon();
+    return $this->fnFinishNode(node, "ImportDeclaration");
   }
 
   // Parses a comma-separated list of module imports.
 
-  public function parseImportSpecifiers()
+  public function fnParseImportSpecifiers()
   {
-    let nodes = [], first = true
+    $aNodes = [];
+    $bFirst = true;
     if ($this->oType === TokenTypes::$aTypes['name']) {
       // import defaultObj, { x, y as z } from '...'
-      let node = $this->fnStartNode()
-      node.local = $this->fnParseIdent()
-      $this->fnCheckLVal(node.local, BIND_LEXICAL)
-      nodes.push($this->fnFinishNode(node, "ImportDefaultSpecifier"))
-      if (!$this->fnEat(TokenTypes::$aTypes['comma'])) return nodes
+      $oNode = $this->fnStartNode();
+      $oNode->oLocal = $this->fnParseIdent();
+      $this->fnCheckLVal($oNode->oLocal, Scope::BIND_LEXICAL);
+      array_push($aNodes, $this->fnFinishNode($oNode, "ImportDefaultSpecifier"));
+      if (!$this->fnEat(TokenTypes::$aTypes['comma'])) 
+        return $aNodes;
     }
     if ($this->oType === TokenTypes::$aTypes['star']) {
-      let node = $this->fnStartNode()
-      $this->fnNext()
-      $this->fnExpectContextual("as")
-      node.local = $this->fnParseIdent()
-      $this->fnCheckLVal(node.local, BIND_LEXICAL)
-      nodes.push($this->fnFinishNode(node, "ImportNamespaceSpecifier"))
-      return nodes
+      $oNode = $this->fnStartNode();
+      $this->fnNext();
+      $this->fnExpectContextual("as");
+      $oNode->oLocal = $this->fnParseIdent();
+      $this->fnCheckLVal($oNode->oLocal, Scope::BIND_LEXICAL);
+      array_push($aNodes, $this->fnFinishNode($oNode, "ImportNamespaceSpecifier"));
+      return $aNodes;
     }
-    $this->fnExpect(TokenTypes::$aTypes['braceL'])
+    $this->fnExpect(TokenTypes::$aTypes['braceL']);
     while (!$this->fnEat(TokenTypes::$aTypes['braceR'])) {
-      if (!first) {
-        $this->fnExpect(TokenTypes::$aTypes['comma'])
-        if ($this->afterTrailingComma(TokenTypes::$aTypes['braceR'])) break
-      } else first = false
+      if (!$bFirst) {
+        $this->fnExpect(TokenTypes::$aTypes['comma']);
+        if ($this->fnAfterTrailingComma(TokenTypes::$aTypes['braceR'])) 
+          break;
+      } else 
+        $bFirst = false;
 
-      let node = $this->fnStartNode()
-      node.imported = $this->fnParseIdent(true)
+      $oNode = $this->fnStartNode();
+      $oNode->oImported = $this->fnParseIdent(true);
       if ($this->fnEatContextual("as")) {
-        node.local = $this->fnParseIdent()
+        $oNode->oLocal = $this->fnParseIdent();
       } else {
-        $this->checkUnreserved(node.imported)
-        node.local = node.imported
+        $this->fnCheckUnreserved(node.imported);
+        $oNode->oLocal = $oNode->oImported;
       }
-      $this->fnCheckLVal(node.local, BIND_LEXICAL)
-      nodes.push($this->fnFinishNode(node, "ImportSpecifier"))
+      $this->fnCheckLVal($oNode->oLocal, Scope::BIND_LEXICAL);
+      array_push($aNodes, $this->fnFinishNode($oNode, "ImportSpecifier"));
     }
-    return nodes
+    return $aNodes;
   }
 
   // Set `ExpressionStatement#directive` property for directive prologues.
-  public function adaptDirectivePrologue(statements)
+  public function fnAdaptDirectivePrologue(&$aStatements)
   {
-    for (let i = 0; i < statements.length && $this->isDirectiveCandidate(statements[i]); ++i) {
-      statements[i].directive = statements[i].expression.raw.slice(1, -1)
+    for ($iI = 0; $iI < count($aStatements) && $this->fnIsDirectiveCandidate($aStatements[$iI]); ++$iI) {
+      $aStatements[$iI]->sDirective = mb_substr($aStatements[$iI]->oExpression->sRaw, 1, count($aStatements[$iI]->oExpression->sRaw)-2);
     }
   }
-  public function fnIsDirectiveCandidate(statement)
+  public function fnIsDirectiveCandidate($oStatement)
   {
     return (
-      statement.type === "ExpressionStatement" &&
-      statement.expression.type === "Literal" &&
-      typeof statement.expression.value === "string" &&
+      $oStatement->sType === "ExpressionStatement" &&
+      $oStatement->oExpression->sType === "Literal" &&
+      is_string($oStatement->oExpression->mValue) &&
       // Reject parenthesized strings.
-      ($this->input[statement.start] === "\"" || $this->input[statement.start] === "'")
-    )
+      (Utilities::fnGetCharAt($this->sInput, $oStatement->iStart) === "\"" 
+       || Utilities::fnGetCharAt($this->sInput, $oStatement->iStart) === "'")
+    );
   }  
   
   public function fnInitialContext() 

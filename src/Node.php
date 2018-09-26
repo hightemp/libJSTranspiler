@@ -44,7 +44,14 @@ class Node
   public $sValue;
   public $oValue;
   public $bSuperClass;
-          
+  public $oSource;
+  public $oDeclaration;
+  public $oSpecifiers;
+  public $oLocal;
+  public $oExported;
+  public $sName;
+  public $oImported;
+  
   public function __construct($oParser, $iPos, $oLoc)
   {
     $this->sType = "";
