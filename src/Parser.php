@@ -398,7 +398,7 @@ class Parser
         return $this->fnParseTryStatement($oNode);
       case TokenTypes::$aTypes['const']: 
       case TokenTypes::$aTypes['var']:
-        $sKind = $sKind ? $sKind : $this->mValue;
+        $sKind = !empty($sKind) ? $sKind : $this->mValue;
         if ($sContext && $sKind !== "var") 
           $this->fnUnexpected();
         return $this->fnParseVarStatement($oNode, $sKind);
@@ -1479,6 +1479,141 @@ class Parser
     }
   }
   
+  public function fnEat($oType) 
+  {
+    if ($this->oType === $oType) {
+      $this->fnNext();
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  // Tests whether parsed token is a contextual keyword.
+
+  public function fnIsContextual($sName) 
+  {
+    return $this->oType === TokenTypes::$aTypes['name']
+      && $this->mValue === $sName 
+      && !$this->bContainsEsc;
+  }
+
+  // Consumes contextual keyword if possible.
+
+  public function fnEatContextual($sName) 
+  {
+    if (!$this->fnIsContextual($sName)) 
+      return false;
+    $this->fnNext();
+    return true;
+  }
+
+  // Asserts that following token is given contextual keyword.
+
+  public function fnExpectContextual($sName) 
+  {
+    if (!$this->fnEatContextual($sName)) 
+      $this->fnUnexpected();
+  }
+
+  // Test whether a semicolon can be inserted at the current position.
+
+  public function fnCanInsertSemicolon() 
+  {
+    return $this->oType === TokenTypes::$aTypes['eof'] ||
+      $this->oType === TokenTypes::$aTypes['braceR'] ||
+      preg_match(Whitespace::lineBreak, mb_substr($this->sInput, $this->iLastTokEnd, $this->iStart - $this->iLastTokEnd));
+  }
+
+  public function fnInsertSemicolon()
+  {
+    if ($this->fnCanInsertSemicolon()) {
+      if (is_callable($this->aOptions['onInsertedSemicolon']))
+        $this->aOptions['onInsertedSemicolon']($this->iLastTokEnd, $this->oLastTokEndLoc);
+      return true;
+    }
+  }
+
+  // Consume a semicolon, or, failing that, see if we are allowed to
+  // pretend that there is a semicolon at this position.
+
+  public function fnSemicolon() 
+  {
+    if (!$this->fnEat(TokenTypes::$aTypes['semi']) 
+        && !$this->fnInsertSemicolon()) 
+      $this->fnUnexpected();
+  }
+
+  public function fnAfterTrailingComma($oTokType, $bNotNext) 
+  {
+    if ($this->oType === $oTokType) {
+      if (is_callable($this->aOptions['onTrailingComma']))
+        $this->aOptions['onTrailingComma']($this->iLastTokStart, $this->oLastTokStartLoc);
+      if (!$bNotNext)
+        $this->fnNext();
+      return true;
+    }
+  }
+
+  // Expect a token of a given type. If found, consume it, otherwise,
+  // raise an unexpected token error.
+
+  public function fnExpect($oType) 
+  {
+    if (!$this->fnEat($oType)) 
+      $this->fnUnexpected();
+  }
+
+  // Raise an unexpected token error.
+
+  public function fnUnexpected($iPos) 
+  {
+    $this->fnRaise($iPos != null ? $iPos : $this->iStart, "Unexpected token");
+  }
+
+  public function fnCheckPatternErrors($oRefDestructuringErrors, $bIsAssign) 
+  {
+    if (!$oRefDestructuringErrors) 
+      return;
+    if ($oRefDestructuringErrors->iTrailingComma > -1)
+      $this->fnRaiseRecoverable($oRefDestructuringErrors->iTrailingComma, "Comma is not permitted after the rest element");
+    $iParens = $bIsAssign ? $oRefDestructuringErrors->iParenthesizedAssign : $oRefDestructuringErrors->iParenthesizedBind;
+    if ($iParens > -1) 
+      $this->fnRaiseRecoverable($iParens, "Parenthesized pattern");
+  }
+
+  public function fnCheckExpressionErrors($oRefDestructuringErrors, $bAndThrow) 
+  {
+    if (!$oRefDestructuringErrors) 
+      return false;
+    $iShorthandAssign = $oRefDestructuringErrors->iShorthandAssign;
+    $iDoubleProto = $oRefDestructuringErrors->iDoubleProto;
+    if (!$bAndThrow) 
+      return $iShorthandAssign >= 0 || $iDoubleProto >= 0;
+    if ($iShorthandAssign >= 0)
+      $this->fnRaise($iShorthandAssign, "Shorthand property assignments are valid only in destructuring patterns");
+    if ($iDoubleProto >= 0)
+      $this->fnRaiseRecoverable($iDoubleProto, "Redefinition of __proto__ property");
+  }
+
+  public function fnCheckYieldAwaitInDefaultParams() 
+  {
+    if ($this->iYieldPos 
+        && (!$this->iAwaitPos 
+            || $this->iYieldPos < $this->iawaitPos))
+      $this->fnRaise($this->iYieldPos, "Yield expression cannot be a default value");
+    if ($this->iAwaitPos)
+      $this->raise($this->iAwaitPos, "Await expression cannot be a default value");
+  }
+
+  public function fnIsSimpleAssignTarget($oExpr) 
+  {
+    if ($oExpr->sType === "ParenthesizedExpression")
+      return $this->fnIsSimpleAssignTarget($oExpr->oExpression);
+    return $oExpr->sType === "Identifier" 
+      || $oExpr->sType === "MemberExpression";
+  }
+  
   public function fnNext() 
   {
     if (is_callable($this->aOptions['onToken']))
@@ -1491,7 +1626,7 @@ class Parser
     $this->fnNextToken();
   }
 
-  public function getToken() 
+  public function fnGetToken() 
   {
     $this->fnNext();
     return new Token($this);
