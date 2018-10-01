@@ -51,6 +51,13 @@ class Node
   public $oExported;
   public $sName;
   public $oImported;
+  public $aProperties;
+  public $aElements;
+  public $sOperator;
+  public $bMethod;
+  public $bShorthand;
+  public $aExpressions;
+  public $bPrefix;
   
   public function __construct($oParser, $iPos, $oLoc)
   {

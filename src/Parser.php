@@ -55,8 +55,6 @@ class Parser
   public $aScopeStack;
   public $bExprAllowed;
   public $bInModule;
-  public $bInAsync;
-  public $bInFunction;
   public $iYieldPos;
   public $iAwaitPos;
   public $oRegexpState;
@@ -475,7 +473,7 @@ class Parser
       }
     }
     if ($iI === count($this->aLabels)) 
-      $this->fnRaise($oNode->iStart, "Unsyntactic " + $sKeyword);
+      $this->fnRaise($oNode->iStart, "Unsyntactic " . $sKeyword);
     return 
       $this->fnFinishNode($oNode, $bIsBreak ? "BreakStatement" : "ContinueStatement");
   }
@@ -516,8 +514,8 @@ class Parser
     $this->fnNext();
     $iAwaitAt = (
         $this->aOptions['ecmaVersion'] >= 9 
-        && ($this->bInAsync 
-            || (!$this->bInFunction 
+        && ($this->fnInAsync() 
+            || (!$this->fnInFunction() 
                 && $this->aOptions['allowAwaitOutsideFunction'])) 
             && $this->fnEatContextual("await")
       ) ? 
@@ -611,7 +609,7 @@ class Parser
 
   public function fnParseReturnStatement(&$oNode)
   {
-    if (!$this->bInFunction 
+    if (!$this->fnInFunction() 
         && !$this->aOptions['allowReturnOutsideFunction'])
       $this->fnRaise($this->iStart, "'return' outside of function");
     $this->fnNext();
@@ -887,7 +885,7 @@ class Parser
 
   public function fnParseVarId(&$oDecl, $sKind)
   {
-    $oDecl->oId = $this->parseBindingAtom($sKind);
+    $oDecl->oId = $this->fnParseBindingAtom($sKind);
     $this->fnCheckLVal($oDecl->oId, $sKind === "var" ? Scope::BIND_VAR : Scope::BIND_LEXICAL, false);
   }
 
@@ -907,7 +905,7 @@ class Parser
     if ($iStatement & self::FUNC_STATEMENT) {
       $oNode->oId = ($iStatement & self::FUNC_NULLABLE_ID) && $this->oType !== TokenTypes::$aTypes['name'] ? null : $this->fnParseIdent();
       if ($oNode->oId && !($iStatement & self::FUNC_HANGING_STATEMENT))
-        $this->fnCheckLVal($oNode->oId, $this->bInModule && !$this->bInFunction ? Scope::BIND_LEXICAL : Scope::BIND_FUNCTION);
+        $this->fnCheckLVal($oNode->oId, $this->bInModule && !$this->fnInFunction() ? Scope::BIND_LEXICAL : Scope::BIND_FUNCTION);
     }
 
     $iOldYieldPos = $this->iYieldPos;
@@ -1603,7 +1601,7 @@ class Parser
             || $this->iYieldPos < $this->iawaitPos))
       $this->fnRaise($this->iYieldPos, "Yield expression cannot be a default value");
     if ($this->iAwaitPos)
-      $this->raise($this->iAwaitPos, "Await expression cannot be a default value");
+      $this->fnRaise($this->iAwaitPos, "Await expression cannot be a default value");
   }
 
   public function fnIsSimpleAssignTarget($oExpr) 
@@ -2489,22 +2487,1206 @@ class Parser
     $oType = TokenTypes::$aTypes['name'];
     if (preg_match($this->sKeywords, $sWord)) {
       if ($this->bContainsEsc) 
-        $this->fnRaiseRecoverable($this->iStart, "Escape sequence in keyword " + word);
+        $this->fnRaiseRecoverable($this->iStart, "Escape sequence in keyword " . $sWord);
       $oType = TokenTypes::$aKeywords[$sWord];
     }
     return $this->fnFinishToken($oType, $sWord);
   }
   
-  public function inFunction() 
+  public function fnToAssignable(&$oNode, $bIsBinding, $oRefDestructuringErrors) 
+  {
+    if ($this->aOptions['ecmaVersion'] >= 6 && $oNode) {
+      switch ($oNode->sType) {
+      case "Identifier":
+        if ($this->fnInAsync() && $oNode->sName === "await")
+          $this->fnRaise($oNode->iStart, "Can not use 'await' as identifier inside an async function");
+        break;
+
+      case "ObjectPattern":
+      case "ArrayPattern":
+      case "RestElement":
+        break;
+
+      case "ObjectExpression":
+        $oNode->sType = "ObjectPattern";
+        if ($oRefDestructuringErrors) 
+          $this->fnCheckPatternErrors($oRefDestructuringErrors, true);
+        foreach ($oNode->aProperties as $oProp) {
+          $this->fnToAssignable($oProp, $bIsBinding);
+          // Early error:
+          //   AssignmentRestProperty[Yield, Await] :
+          //     `...` DestructuringAssignmentTarget[Yield, Await]
+          //
+          //   It is a Syntax Error if |DestructuringAssignmentTarget| is an |ArrayLiteral| or an |ObjectLiteral|.
+          if (
+            $oProp->sType === "RestElement" 
+              && ($oProp->oArgument->sType === "ArrayPattern" 
+                  || $oProp->oArgument->sType === "ObjectPattern")
+          ) {
+            $this->fnRaise($oProp->oArgument->iStart, "Unexpected token");
+          }
+        }
+        break;
+
+      case "Property":
+        // AssignmentProperty has type === "Property"
+        if ($oNode->sKind !== "init") 
+          $this->fnRaise($oNode->oKey->iStart, "Object pattern can't contain getter or setter");
+        $this->fnToAssignable($oNode->oValue, $bIsBinding);
+        break;
+
+      case "ArrayExpression":
+        $oNode->sType = "ArrayPattern";
+        if ($oRefDestructuringErrors) 
+          $this->fnCheckPatternErrors($oRefDestructuringErrors, true);
+        $this->fnToAssignableList($oNode->aElements, $bIsBinding);
+        break;
+
+      case "SpreadElement":
+        $oNode->sType = "RestElement";
+        $this->fnToAssignable($oNode->oArgument, $bIsBinding);
+        if ($oNode->oArgument->sType === "AssignmentPattern")
+          $this->fnRaise($oNode->oArgument->iStart, "Rest elements cannot have a default value");
+        break;
+
+      case "AssignmentExpression":
+        if ($oNode->sOperator !== "=") 
+          $this->fnRaise($oNode->oLeft->iEnd, "Only '=' operator can be used for specifying default value.");
+        $oNode->sType = "AssignmentPattern";
+        //delete node.operator;
+        $this->fnToAssignable($oNode->oLeft, $bIsBinding);
+        // falls through to AssignmentPattern
+
+      case "AssignmentPattern":
+        break;
+
+      case "ParenthesizedExpression":
+        $this->fnToAssignable($oNode->oExpression, $bIsBinding);
+        break;
+
+      case "MemberExpression":
+        if (!$bIsBinding) 
+          break;
+
+      default:
+        $this->fnRaise($oNode->iStart, "Assigning to rvalue");
+      }
+    } else if ($oRefDestructuringErrors) 
+      $this->fnCheckPatternErrors($oRefDestructuringErrors, true);
+    return $oNode;
+  }
+
+  // Convert list of expression atoms to binding list.
+
+  public function toAssignableList($aExprList, $bIsBinding) 
+  {
+    $iEnd = count($aExprList);
+    for ($iI = 0; $iI < $iEnd; $iI++) {
+      $oElt = $aExprList[$iI];
+      if ($oElt) 
+        $this->fnToAssignable($oElt, $bIsBinding);
+    }
+    if ($iEnd) {
+      $oLast = $aExprList[$iEnd - 1];
+      if ($this->aOptions['ecmaVersion'] === 6 
+          && $bIsBinding 
+          && $oLast 
+          && $oLast->sType === "RestElement" 
+          && $oLast->oArgument->sType !== "Identifier")
+        $this->fnUnexpected($oLast->oArgument->iStart);
+    }
+    return $aExprList;
+  }
+
+  // Parses spread element.
+
+  public function fnParseSpread($oRefDestructuringErrors) 
+  {
+    $oNode = $this->fnStartNode();
+    $this->fnNext();
+    $oNode->oArgument = $this->fnParseMaybeAssign(false, $oRefDestructuringErrors);
+    return $this->fnFinishNode($oNode, "SpreadElement");
+  }
+
+  public function fnParseRestBinding() 
+  {
+    $oNode = $this->fnStartNode();
+    $this->fnNext();
+
+    // RestElement inside of a function parameter must be an identifier
+    if ($this->aOptions['ecmaVersion'] === 6 
+        && $this->oType !== TokenTypes::$aTypes['name']) 
+      $this->fnUnexpected();
+
+    $oNode->oArgument = $this->fnParseBindingAtom();
+
+    return $this->fnFinishNode($oNode, "RestElement");
+  }
+
+  // Parses lvalue (assignable) atom.
+
+  public function fnParseBindingAtom() 
+  {
+    if ($this->aOptions['ecmaVersion'] >= 6) {
+      switch ($this->oType) {
+        case TokenTypes::$aTypes['bracketL']:
+          $oNode = $this->fnStartNode();
+          $this->fnNext();
+          $oNode->aElements = $this->fnParseBindingList(TokenTypes::$aTypes['bracketR'], true, true);
+          return $this->fnFinishNode($oNode, "ArrayPattern");
+
+        case TokenTypes::$aTypes['braceL']:
+          return $this->fnParseObj(true);
+      }
+    }
+    return $this->fnParseIdent();
+  }
+
+  public function fnParseBindingList($oClose, $bAllowEmpty, $bAllowTrailingComma) 
+  {
+    $aElts = [];
+    $bFirst = true;
+    while (!$this->fnEat($oClose)) {
+      if ($bFirst) 
+        $bFirst = false;
+      else 
+        $this->fnExpect(TokenTypes::$aTypes['comma']);
+      if ($bAllowEmpty && $this->oType === TokenTypes::$aTypes['comma']) {
+        array_push($aElts, null);
+      } else if ($bAllowTrailingComma && $this->fnAfterTrailingComma($oClose)) {
+        break;
+      } else if ($this->oType === TokenTypes::$aTypes['ellipsis']) {
+        $oRest = $this->fnParseRestBinding();
+        $this->fnParseBindingListItem($oRest);
+        array_push($aElts, $oRest);
+        if ($this->oType === TokenTypes::$aTypes['comma']) 
+          $this->fnRaise($this->iStart, "Comma is not permitted after the rest element");
+        $this->fnExpect($oClose);
+        break;
+      } else {
+        $oElem = $this->fnParseMaybeDefault($this->iStart, $this->oStartLoc);
+        $this->fnParseBindingListItem($oElem);
+        array_push($aElts, $oElem);
+      }
+    }
+    return $aElts;
+  }
+
+  public function parseBindingListItem($oParam) 
+  {
+    return $oParam;
+  }
+
+  // Parses assignment pattern around given atom if possible.
+
+  public function fnParseMaybeDefault($iStartPos, $oStartLoc, $oLeft) 
+  {
+    if (!$oLeft) {
+      $oLeft = $this->fnParseBindingAtom();
+    }
+    if ($this->aOptions['ecmaVersion'] < 6 
+        || !$this->fnEat(TokenTypes::$aTypes['eq'])) 
+      return $oLeft;
+    $oNode = $this->fnStartNodeAt($iStartPos, $oStartLoc);
+    $oNode->oLeft = $oLeft;
+    $oNode->oRight = $this->fnParseMaybeAssign();
+    return $this->fnFinishNode($oNode, "AssignmentPattern");
+  }
+
+  // Verify that a node is an lval — something that can be assigned
+  // to.
+  // bindingType can be either:
+  // 'var' indicating that the lval creates a 'var' binding
+  // 'let' indicating that the lval creates a lexical ('let' or 'const') binding
+  // 'none' indicating that the binding should be checked for illegal identifiers, but not for duplicate references
+
+  public function fnCheckLVal($oExpr, $iBindingType = Scope::BIND_NONE, $aCheckClashes) 
+  {
+    switch ($oExpr->sType) {
+      case "Identifier":
+        if ($this->bStrict && preg_match($this->sReservedWordsStrictBind, $oExpr->sName))
+          $this->fnRaiseRecoverable($oExpr->iStart, ($iBindingType ? "Binding " : "Assigning to ") . $oExpr->sName . " in strict mode");
+        if ($aCheckClashes) {
+          if (in_array($oExpr->sName, $aCheckClashes))
+            $this->fnRaiseRecoverable($oExpr->iStart, "Argument name clash");
+          $aCheckClashes[$oExpr->sName] = true;
+        }
+        if ($iBindingType !== Scope::BIND_NONE && $iBindingType !== Scope::BIND_OUTSIDE) 
+          $this->fnDeclareName($oExpr->sName, $iBindingType, $oExpr->iStart);
+        break;
+
+      case "MemberExpression":
+        if ($iBindingType) 
+          $this->fnRaiseRecoverable($oExpr->iStart, "Binding member expression");
+        break;
+
+      case "ObjectPattern":
+        foreach ($oExpr->aProperties as $oProp)
+          $this->fnCheckLVal($oProp, $iBindingType, $aCheckClashes);
+        break;
+
+      case "Property":
+        // AssignmentProperty has type === "Property"
+        $this->fnCheckLVal($oExpr->oValue, $iBindingType, $aCheckClashes);
+        break;
+
+      case "ArrayPattern":
+        foreach ($oExpr->aElements as $oElem) {
+          if ($oElem) 
+            $this->fnCheckLVal($oElem, $iBindingType, $aCheckClashes);
+        }
+        break;
+
+      case "AssignmentPattern":
+        $this->fnCheckLVal($oExpr->oLeft, $iBindingType, $aCheckClashes);
+        break;
+
+      case "RestElement":
+        $this->fnCheckLVal($oExpr->oArgument, $iBindingType, $aCheckClashes);
+        break;
+
+      case "ParenthesizedExpression":
+        $this->fnCheckLVal($oExpr->oExpression, $iBindingType, $aCheckClashes);
+        break;
+
+      default:
+        $this->fnRaise($oExpr->iStart, ($iBindingType ? "Binding" : "Assigning to") . " rvalue");
+    }
+  }
+  
+  public function fnCheckPropClash($oProp, &$aPropHash, &$oRefDestructuringErrors) 
+  {
+    if ($this->aOptions['ecmaVersion'] >= 9 && $oProp->sType === "SpreadElement")
+      return;
+    if ($this->aOptions['ecmaVersion'] >= 6 && ($oProp->bComputed || $oProp->bMethod || $oProp->bShorthand))
+      return;
+    $oKey = $oProp->oKey;
+    $sName;
+    switch (key.type) {
+      case "Identifier": 
+        $sName = $oKey->sName; 
+        break;
+      case "Literal": 
+        $sName = $oKey->sValue; //?
+        break;
+      default: 
+        return;
+    }
+    $sKind = $oProp->sKind;
+    if ($this->aOptions['ecmaVersion'] >= 6) {
+      if ($sName === "__proto__" && $sKind === "init") {
+        if ($aPropHash['proto']) {
+          if ($oRefDestructuringErrors && $oRefDestructuringErrors->iDoubleProto < 0) 
+            $oRefDestructuringErrors->iDoubleProto = $oKey->iStart;
+          // Backwards-compat kludge. Can be removed in version 6.0
+          else 
+            $this->fnRaiseRecoverable($oKey->iStart, "Redefinition of __proto__ property");
+        }
+        $aPropHash['proto'] = true;
+      }
+      return;
+    }
+    $sName = "$" . $sName;
+    $oOther = &$aPropHash[$sName];
+    if ($oOther) {
+      $bRedefinition;
+      if ($sKind === "init") {
+        $bRedefinition = $this->bStrict && $oOther['init'] || $oOther['get'] || $oOther['set'];
+      } else {
+        $bRedefinition = $oOther['init'] || $oOther[$sKind];
+      }
+      if ($bRedefinition)
+        $this->fnRaiseRecoverable($oKey->iStart, "Redefinition of property");
+    } else {
+      //$oOther = $aPropHash[$sName] = [
+      $oOther = [
+        'init' => false,
+        'get' => false,
+        'set' => false,
+      ];
+    }
+    $oOther[$sKind] = true;
+  }
+
+  // ### Expression parsing
+
+  // These nest, from the most general expression type at the top to
+  // 'atomic', nondivisible expression types at the bottom. Most of
+  // the functions will simply let the function(s) below them parse,
+  // and, *if* the syntactic construct they handle is present, wrap
+  // the AST node that the inner parser gave them in another node.
+
+  // Parse a full expression. The optional arguments are used to
+  // forbid the `in` operator (in for loops initalization expressions)
+  // and provide reference for storing '=' operator inside shorthand
+  // property assignment in contexts where both object expression
+  // and object pattern might appear (so it's possible to raise
+  // delayed syntax error at correct position).
+
+  public function fnParseExpression($oNoIn, $oRefDestructuringErrors) 
+  {
+    $iStartPos = $this->iStart;
+    $oStartLoc = $this->oStartLoc;
+    $oExpr = $this->fnParseMaybeAssign($oNoIn, $oRefDestructuringErrors);
+    if ($this->oType === TokenTypes::$aTypes['comma']) {
+      $oNode = $this->fnStartNodeAt($iStartPos, $oStartLoc);
+      $oNode->aExpressions = [$oExpr];
+      while ($this->fnEat(TokenTypes::$aTypes['comma'])) 
+        array_push($oNode->aExpressions, $this->fnParseMaybeAssign($oNoIn, $oRefDestructuringErrors));
+      return $this->fnFinishNode($oNode, "SequenceExpression");
+    }
+    return $oExpr;
+  }
+
+  // Parse an assignment expression. This includes applications of
+  // operators like `+=`.
+
+  public function fnParseMaybeAssign($oNoIn, &$oRefDestructuringErrors, $fnAfterLeftParse) 
+  {
+    if ($this->fnIsContextual("yield")) {
+      if ($this->fnInGenerator()) 
+        return $this->fnParseYield();
+      // The tokenizer will assume an expression is allowed after
+      // `yield`, but this isn't that kind of yield
+      else 
+        $this->bExprAllowed = false;
+    }
+
+    $bOwnDestructuringErrors = false;
+    $iOldParenAssign = -1;
+    $iOldTrailingComma = -1;
+    if ($oRefDestructuringErrors) {
+      $iOldParenAssign = $oRefDestructuringErrors->iParenthesizedAssign;
+      $iOldTrailingComma = $oRefDestructuringErrors->iTrailingComma;
+      $oRefDestructuringErrors->iParenthesizedAssign = $oRefDestructuringErrors->iTrailingComma = -1;
+    } else {
+      $oRefDestructuringErrors = new DestructuringErrors();
+      $bOwnDestructuringErrors = true;
+    }
+
+    $iStartPos = $this->iStart;
+    $oStartLoc = $this->oStartLoc;
+    
+    if ($this->oType === TokenTypes::$aTypes['parenL'] 
+        || $this->oType === TokenTypes::$aTypes['name'])
+      $this->iPotentialArrowAt = $this->iStart;
+    $oLeft = $this->fnParseMaybeConditional($oNoIn, $oRefDestructuringErrors);
+    if (is_callable($fnAfterLeftParse)) {
+      $fnTemp = Closure::bind($fnAfterLeftParse, $this);
+      $oLeft = $fnTemp($oLeft, $iStartPos, $oStartLoc);
+    }
+    if ($this->oType->bIsAssign) {
+      $oNode = $this->fnStartNodeAt($iStartPos, $oStartLoc);
+      $oNode->sOperator = $this->sValue;
+      $oNode->oLeft = $this->oType === TokenTypes::$aTypes['eq'] ? 
+        $this->fnToAssignable($oLeft, false, $oRefDestructuringErrors) : 
+        $oLeft;
+      //if (!$bOwnDestructuringErrors) 
+      //  DestructuringErrors.call($oRefDestructuringErrors)
+      $oRefDestructuringErrors->iShorthandAssign = -1; // reset because shorthand default was used correctly
+      $this->fnCheckLVal($oLeft);
+      $this->fnNext();
+      $oNode->oRight = $this->fnParseMaybeAssign($oNoIn);
+      return $this->fnFinishNode($oNode, "AssignmentExpression");
+    } else {
+      if ($bOwnDestructuringErrors) 
+        $this->fnCheckExpressionErrors($oRefDestructuringErrors, true);
+    }
+    if ($iOldParenAssign > -1) 
+      $oRefDestructuringErrors->iParenthesizedAssign = $iOldParenAssign;
+    if ($iOldTrailingComma > -1) 
+      $oRefDestructuringErrors->iTrailingComma = $iOldTrailingComma;
+    return $oLeft;
+  }
+
+  // Parse a ternary conditional (`?:`) operator.
+
+  public function fnParseMaybeConditional($oNoIn, $oRefDestructuringErrors) 
+  {
+    $iStartPos = $this->iStart;
+    $oStartLoc = $this->oStartLoc;
+    $oExpr = $this->fnParseExprOps($oNoIn, $oRefDestructuringErrors);
+    if ($this->fnCheckExpressionErrors($oRefDestructuringErrors)) 
+      return $oExpr;
+    if ($this->fnEat(TokenTypes::$aTypes['question'])) {
+      $oNode = $this->fnStartNodeAt($iStartPos, $oStartLoc);
+      $oNode->oTest = $oExpr;
+      $oNode->oConsequent = $this->fnParseMaybeAssign();
+      $this->fnExpect(TokenTypes::$aTypes['colon']);
+      $oNode->oAlternate = $this->fnParseMaybeAssign(noIn);
+      return $this->fnFinishNode($oNode, "ConditionalExpression");
+    }
+    return $oExpr;
+  }
+
+  // Start the precedence parser.
+
+  public function fnParseExprOps($oNoIn, $oRefDestructuringErrors) 
+  {
+    $iStartPos = $this->iStart;
+    $oStartLoc = $this->oStartLoc;
+    $oExpr = $this->fnParseMaybeUnary($oRefDestructuringErrors, false);
+    if ($this->fnCheckExpressionErrors($oRefDestructuringErrors)) 
+      return $oExpr;
+    return $oExpr->iStart === $iStartPos 
+      && $oExpr->sType === "ArrowFunctionExpression" ? 
+        $oExpr : 
+        $this->fnParseExprOp($oExpr, $iStartPos, $oStartLoc, -1, $oNoIn);
+  }
+
+  // Parse binary operators with the operator precedence parsing
+  // algorithm. `left` is the left-hand side of the operator.
+  // `minPrec` provides context that allows the function to stop and
+  // defer further parser to one of its callers when it encounters an
+  // operator that has a lower precedence than the set it is parsing.
+
+  public function fnParseExprOp($oLeft, $iLeftStartPos, $oLeftStartLoc, $iMinPrec, $oNoIn) 
+  {
+    $iPrec = $this->oType->iBinop;
+    if ($iPrec != null && (!$oNoIn || $this->oType !== TokenTypes::$aTypes['_in'])) {
+      if ($iPrec > $iMinPrec) {
+        $bLogical = $this->oType === TokenTypes::$aTypes['logicalOR'] 
+          || $this->oType === TokenTypes::$aTypes['logicalAND'];
+        $sOp = $this->mValue;
+        $this->fnNext();
+        $iStartPos = $this->iStart;
+        $oStartLoc = $this->oStartLoc;
+        $oRight = $this->fnParseExprOp($this->fnParseMaybeUnary(null, false), $iStartPos, $oStartLoc, $iPrec, $oNoIn);
+        $oNode = $this->fnBuildBinary($iLeftStartPos, $oLeftStartLoc, $oLeft, $oRight, $sOp, $bLogical);
+        return $this->fnParseExprOp($oNode, $iLeftStartPos, $oLeftStartLoc, $iMinPrec, $oNoIn);
+      }
+    }
+    return $oLeft;
+  }
+
+  public function fnBuildBinary($iStartPos, $oStartLoc, $oLeft, $oRight, $sOp, $bLogical) 
+  {
+    $oNode = $this->fnStartNodeAt($iStartPos, $oStartLoc);
+    $oNode->oLeft = $oLeft;
+    $oNode->sOperator = $sOp;
+    $oNode->oRight = $oRight;
+    return $this->fnFinishNode($oNode, $bLogical ? "LogicalExpression" : "BinaryExpression");
+  }
+
+  // Parse unary operators, both prefix and postfix.
+
+  public function fnParseMaybeUnary($oRefDestructuringErrors, $bSawUnary) 
+  {
+    $iStartPos = $this->iStart;
+    $oStartLoc = $this->oStartLoc;
+    $oExpr;
+    if ($this->fnIsContextual("await") && ($this->fnInAsync() || (!$this->fnInFunction() && $this->aOptions['allowAwaitOutsideFunction']))) {
+      $oExpr = $this->fnParseAwait();
+      $bSawUnary = true;
+    } else if ($this->oType->bPrefix) {
+      $oNode = $this->fnStartNode();
+      $bUpdate = $this->oType === TokenTypes::$aTypes['incDec'];
+      $oNode->sOperator = $this->mValue;
+      $oNode->bPrefix = true;
+      $this->fnNext();
+      $oNode->oArgument = $this->fnParseMaybeUnary(null, true);
+      $this->fnCheckExpressionErrors($oRefDestructuringErrors, true);
+      
+      if ($bUpdate) 
+        $this->fnCheckLVal($oNode->oArgument);
+      elseif ($this->bStrict 
+              && $oNode->sOperator === "delete" 
+              && $oNode->oArgument->sType === "Identifier")
+        $this->fnRaiseRecoverable($oNode->iStart, "Deleting local variable in strict mode");
+      else 
+        $bSawUnary = true;
+      $oExpr = $this->fnFinishNode($oNode, $bUpdate ? "UpdateExpression" : "UnaryExpression");
+    } else {
+      $oExpr = $this->fnParseExprSubscripts($oRefDestructuringErrors);
+      if ($this->fnCheckExpressionErrors($oRefDestructuringErrors)) 
+        return $oExpr;
+      while ($this->oType->bPostfix && !$this->fnCanInsertSemicolon()) {
+        $oNode = $this->fnStartNodeAt($iStartPos, $oStartLoc);
+        $oNode->sOperator = $this->mValue;
+        $oNode->bPrefix = false;
+        $oNode->oArgument = $oExpr;
+        $this->fnCheckLVal($oExpr);
+        $this->fnNext();
+        $oExpr = $this->fnFinishNode($oNode, "UpdateExpression");
+      }
+    }
+
+    if (!$bSawUnary && $this->fnEat(TokenTypes::$aTypes['starstar']))
+      return $this->fnBuildBinary($iStartPos, $oStartLoc, $oExpr, $this->fnParseMaybeUnary(null, false), "**", false);
+    else
+      return $oExpr;
+  }
+
+  // Parse call, dot, and `[]`-subscript expressions.
+
+  public function fnParseExprSubscripts($oRefDestructuringErrors) 
+  {
+    $iStartPos = $this->iStart;
+    $oStartLoc = $this->oStartLoc;
+    $oExpr = $this->fnParseExprAtom($oRefDestructuringErrors);
+    $bSkipArrowSubscripts = $oExpr->sType === "ArrowFunctionExpression" 
+      && mb_substr($this->sInput, $this->iLastTokStart, $this->iLastTokEnd - $this->iLastTokStart) !== ")";
+    if ($this->fnCheckExpressionErrors($oRefDestructuringErrors) || $bSkipArrowSubscripts) 
+      return $oExpr;
+    $oResult = $this->fnParseSubscripts($oExpr, $iStartPos, $oStartLoc);
+    if ($oRefDestructuringErrors && $oResult->sType === "MemberExpression") {
+      if ($oRefDestructuringErrors->iParenthesizedAssign >= $oResult->iStart) 
+        $oRefDestructuringErrors->iParenthesizedAssign = -1;
+      if ($oRefDestructuringErrors->iParenthesizedBind >= $oResult->iStart) 
+        $oRefDestructuringErrors->iParenthesizedBind = -1;
+    }
+    return $oResult;
+  }
+
+  public function fnParseSubscripts(base, startPos, startLoc, noCalls) {
+    let maybeAsyncArrow = $this->aOptions['ecmaVersion'] >= 8 && base.type === "Identifier" && base.name === "async" &&
+        $this->lastTokEnd === base.end && !$this->fnCanInsertSemicolon() && $this->input.slice(base.start, base.end) === "async"
+    for (let computed;;) {
+      if ((computed = $this->fnEat(TokenTypes::$aTypes['bracketL'])) || $this->fnEat(TokenTypes::$aTypes['dot'])) {
+        let node = $this->fnStartNodeAt(startPos, startLoc)
+        node.object = base
+        node.property = computed ? $this->parseExpression() : $this->parseIdent(true)
+        node.computed = !!computed
+        if (computed) $this->fnExpect(TokenTypes::$aTypes['bracketR'])
+        base = $this->fnFinishNode(node, "MemberExpression")
+      } else if (!noCalls && $this->fnEat(TokenTypes::$aTypes['parenL'])) {
+        let $oRefDestructuringErrors = new DestructuringErrors, oldYieldPos = $this->yieldPos, oldAwaitPos = $this->awaitPos
+        $this->yieldPos = 0
+        $this->awaitPos = 0
+        let exprList = $this->parseExprList(TokenTypes::$aTypes['parenR'], $this->aOptions['ecmaVersion'] >= 8, false, $oRefDestructuringErrors)
+        if (maybeAsyncArrow && !$this->fnCanInsertSemicolon() && $this->fnEat(TokenTypes::$aTypes['arrow'])) {
+          $this->checkPatternErrors($oRefDestructuringErrors, false)
+          $this->checkYieldAwaitInDefaultParams()
+          $this->yieldPos = oldYieldPos
+          $this->awaitPos = oldAwaitPos
+          return $this->parseArrowExpression($this->fnStartNodeAt(startPos, startLoc), exprList, true)
+        }
+        $this->fnCheckExpressionErrors($oRefDestructuringErrors, true)
+        $this->yieldPos = oldYieldPos || $this->yieldPos
+        $this->awaitPos = oldAwaitPos || $this->awaitPos
+        let node = $this->fnStartNodeAt(startPos, startLoc)
+        node.callee = base
+        node.arguments = exprList
+        base = $this->fnFinishNode(node, "CallExpression")
+      } else if ($this->type === TokenTypes::$aTypes['backQuote']) {
+        let node = $this->fnStartNodeAt(startPos, startLoc)
+        node.tag = base
+        node.quasi = $this->parseTemplate({isTagged: true})
+        base = $this->fnFinishNode(node, "TaggedTemplateExpression")
+      } else {
+        return base
+      }
+    }
+  }
+
+  // Parse an atomic expression — either a single token that is an
+  // expression, an expression started by a keyword like `function` or
+  // `new`, or an expression wrapped in punctuation like `()`, `[]`,
+  // or `{}`.
+
+  public function fnparseExprAtom = function($oRefDestructuringErrors) {
+    let node, canBeArrow = $this->potentialArrowAt === $this->start
+    switch ($this->type) {
+    case TokenTypes::$aTypes['_super']:
+      if (!$this->inFunction)
+        $this->raise($this->start, "'super' outside of function or class")
+      node = $this->fnStartNode()
+      $this->fnNext()
+      // The `super` keyword can appear at below:
+      // SuperProperty:
+      //     super [ Expression ]
+      //     super . IdentifierName
+      // SuperCall:
+      //     super Arguments
+      if ($this->type !== TokenTypes::$aTypes['dot'] && $this->type !== TokenTypes::$aTypes['bracketL'] && $this->type !== TokenTypes::$aTypes['parenL'])
+        $this->unexpected()
+      return $this->fnFinishNode(node, "Super")
+
+    case TokenTypes::$aTypes['_this']:
+      node = $this->fnStartNode()
+      $this->fnNext()
+      return $this->fnFinishNode(node, "ThisExpression")
+
+    case TokenTypes::$aTypes['name']:
+      let startPos = $this->start, startLoc = $this->startLoc, containsEsc = $this->containsEsc
+      let id = $this->parseIdent($this->type !== TokenTypes::$aTypes['name'])
+      if ($this->aOptions['ecmaVersion'] >= 8 && !containsEsc && id.name === "async" && !$this->fnCanInsertSemicolon() && $this->fnEat(TokenTypes::$aTypes['_function']))
+        return $this->parseFunction($this->fnStartNodeAt(startPos, startLoc), 0, false, true)
+      if (canBeArrow && !$this->fnCanInsertSemicolon()) {
+        if ($this->fnEat(TokenTypes::$aTypes['arrow']))
+          return $this->parseArrowExpression($this->fnStartNodeAt(startPos, startLoc), [id], false)
+        if ($this->aOptions['ecmaVersion'] >= 8 && id.name === "async" && $this->type === TokenTypes::$aTypes['name'] && !containsEsc) {
+          id = $this->parseIdent()
+          if ($this->fnCanInsertSemicolon() || !$this->fnEat(TokenTypes::$aTypes['arrow']))
+            $this->unexpected()
+          return $this->parseArrowExpression($this->fnStartNodeAt(startPos, startLoc), [id], true)
+        }
+      }
+      return id
+
+    case TokenTypes::$aTypes['regexp']:
+      let value = $this->value
+      node = $this->parseLiteral(value.value)
+      node.regex = {pattern: value.pattern, flags: value.flags}
+      return node
+
+    case TokenTypes::$aTypes['num']: case TokenTypes::$aTypes['string']:
+      return $this->parseLiteral($this->value)
+
+    case TokenTypes::$aTypes['_null']: case TokenTypes::$aTypes['_true']: case TokenTypes::$aTypes['_false']:
+      node = $this->fnStartNode()
+      node.value = $this->type === TokenTypes::$aTypes['_null'] ? null : $this->type === TokenTypes::$aTypes['_true']
+      node.raw = $this->type.keyword
+      $this->fnNext()
+      return $this->fnFinishNode(node, "Literal")
+
+    case TokenTypes::$aTypes['parenL']:
+      let start = $this->start, expr = $this->parseParenAndDistinguishExpression(canBeArrow)
+      if ($oRefDestructuringErrors) {
+        if ($oRefDestructuringErrors.parenthesizedAssign < 0 && !$this->isSimpleAssignTarget(expr))
+          $oRefDestructuringErrors.parenthesizedAssign = start
+        if ($oRefDestructuringErrors.parenthesizedBind < 0)
+          $oRefDestructuringErrors.parenthesizedBind = start
+      }
+      return expr
+
+    case TokenTypes::$aTypes['bracketL']:
+      node = $this->fnStartNode()
+      $this->fnNext()
+      node.elements = $this->parseExprList(TokenTypes::$aTypes['bracketR'], true, true, $oRefDestructuringErrors)
+      return $this->fnFinishNode(node, "ArrayExpression")
+
+    case TokenTypes::$aTypes['braceL']:
+      return $this->parseObj(false, $oRefDestructuringErrors)
+
+    case TokenTypes::$aTypes['_function']:
+      node = $this->fnStartNode()
+      $this->fnNext()
+      return $this->parseFunction(node, 0)
+
+    case TokenTypes::$aTypes['_class']:
+      return $this->parseClass($this->fnStartNode(), false)
+
+    case TokenTypes::$aTypes['_new']:
+      return $this->parseNew()
+
+    case TokenTypes::$aTypes['backQuote']:
+      return $this->parseTemplate()
+
+    default:
+      $this->unexpected()
+    }
+  }
+
+  public function fnparseLiteral = function(value) {
+    let node = $this->fnStartNode()
+    node.value = value
+    node.raw = $this->input.slice($this->start, $this->end)
+    $this->fnNext()
+    return $this->fnFinishNode(node, "Literal")
+  }
+
+  public function fnparseParenExpression = function() {
+    $this->fnExpect(TokenTypes::$aTypes['parenL'])
+    let val = $this->parseExpression()
+    $this->fnExpect(TokenTypes::$aTypes['parenR'])
+    return val
+  }
+
+  public function fnparseParenAndDistinguishExpression = function(canBeArrow) {
+    let startPos = $this->start, startLoc = $this->startLoc, val, allowTrailingComma = $this->aOptions['ecmaVersion'] >= 8
+    if ($this->aOptions['ecmaVersion'] >= 6) {
+      $this->fnNext()
+
+      let innerStartPos = $this->start, innerStartLoc = $this->startLoc
+      let exprList = [], first = true, lastIsComma = false
+      let $oRefDestructuringErrors = new DestructuringErrors, oldYieldPos = $this->yieldPos, oldAwaitPos = $this->awaitPos, spreadStart
+      $this->yieldPos = 0
+      $this->awaitPos = 0
+      while ($this->type !== TokenTypes::$aTypes['parenR']) {
+        first ? first = false : $this->fnExpect(TokenTypes::$aTypes['comma'])
+        if (allowTrailingComma && $this->afterTrailingComma(TokenTypes::$aTypes['parenR'], true)) {
+          lastIsComma = true
+          break
+        } else if ($this->type === TokenTypes::$aTypes['ellipsis']) {
+          spreadStart = $this->start
+          exprList.push($this->parseParenItem($this->parseRestBinding()))
+          if ($this->type === TokenTypes::$aTypes['comma']) $this->raise($this->start, "Comma is not permitted after the rest element")
+          break
+        } else {
+          exprList.push($this->fnParseMaybeAssign(false, $oRefDestructuringErrors, $this->parseParenItem))
+        }
+      }
+      let innerEndPos = $this->start, innerEndLoc = $this->startLoc
+      $this->fnExpect(TokenTypes::$aTypes['parenR'])
+
+      if (canBeArrow && !$this->fnCanInsertSemicolon() && $this->fnEat(TokenTypes::$aTypes['arrow'])) {
+        $this->checkPatternErrors($oRefDestructuringErrors, false)
+        $this->checkYieldAwaitInDefaultParams()
+        $this->yieldPos = oldYieldPos
+        $this->awaitPos = oldAwaitPos
+        return $this->parseParenArrowList(startPos, startLoc, exprList)
+      }
+
+      if (!exprList.length || lastIsComma) $this->unexpected($this->lastTokStart)
+      if (spreadStart) $this->unexpected(spreadStart)
+      $this->fnCheckExpressionErrors($oRefDestructuringErrors, true)
+      $this->yieldPos = oldYieldPos || $this->yieldPos
+      $this->awaitPos = oldAwaitPos || $this->awaitPos
+
+      if (exprList.length > 1) {
+        val = $this->fnStartNodeAt(innerStartPos, innerStartLoc)
+        val.expressions = exprList
+        $this->fnFinishNodeAt(val, "SequenceExpression", innerEndPos, innerEndLoc)
+      } else {
+        val = exprList[0]
+      }
+    } else {
+      val = $this->parseParenExpression()
+    }
+
+    if ($this->options.preserveParens) {
+      let par = $this->fnStartNodeAt(startPos, startLoc)
+      par.expression = val
+      return $this->fnFinishNode(par, "ParenthesizedExpression")
+    } else {
+      return val
+    }
+  }
+
+  public function fnparseParenItem = function(item) {
+    return item
+  }
+
+  public function fnparseParenArrowList = function(startPos, startLoc, exprList) {
+    return $this->parseArrowExpression($this->fnStartNodeAt(startPos, startLoc), exprList)
+  }
+
+  // New's precedence is slightly tricky. It must allow its argument to
+  // be a `[]` or dot subscript expression, but not a call — at least,
+  // not without wrapping it in parentheses. Thus, it uses the noCalls
+  // argument to parseSubscripts to prevent it from consuming the
+  // argument list.
+
+  const empty = []
+
+  public function fnparseNew = function() {
+    let node = $this->fnStartNode()
+    let meta = $this->parseIdent(true)
+    if ($this->aOptions['ecmaVersion'] >= 6 && $this->fnEat(TokenTypes::$aTypes['dot'])) {
+      node.meta = meta
+      let containsEsc = $this->containsEsc
+      node.property = $this->parseIdent(true)
+      if (node.property.name !== "target" || containsEsc)
+        $this->fnRaiseRecoverable(node.property.start, "The only valid meta property for new is new.target")
+      if (!$this->inNonArrowFunction())
+        $this->fnRaiseRecoverable(node.start, "new.target can only be used in functions")
+      return $this->fnFinishNode(node, "MetaProperty")
+    }
+    let startPos = $this->start, startLoc = $this->startLoc
+    node.callee = $this->fnParseSubscripts($this->fnParseExprAtom(), startPos, startLoc, true)
+    if ($this->fnEat(TokenTypes::$aTypes['parenL'])) node.arguments = $this->parseExprList(TokenTypes::$aTypes['parenR'], $this->aOptions['ecmaVersion'] >= 8, false)
+    else node.arguments = empty
+    return $this->fnFinishNode(node, "NewExpression")
+  }
+
+  // Parse template expression.
+
+  public function fnparseTemplateElement = function({isTagged}) {
+    let elem = $this->fnStartNode()
+    if ($this->type === TokenTypes::$aTypes['invalidTemplate']) {
+      if (!isTagged) {
+        $this->fnRaiseRecoverable($this->start, "Bad escape sequence in untagged template literal")
+      }
+      elem.value = {
+        raw: $this->value,
+        cooked: null
+      }
+    } else {
+      elem.value = {
+        raw: $this->input.slice($this->start, $this->end).replace(/\r\n?/g, "\n"),
+        cooked: $this->value
+      }
+    }
+    $this->fnNext()
+    elem.tail = $this->type === TokenTypes::$aTypes['backQuote']
+    return $this->fnFinishNode(elem, "TemplateElement")
+  }
+
+  public function fnparseTemplate = function({isTagged = false} = {}) {
+    let node = $this->fnStartNode()
+    $this->fnNext()
+    node.expressions = []
+    let curElt = $this->parseTemplateElement({isTagged})
+    node.quasis = [curElt]
+    while (!curElt.tail) {
+      if ($this->type === TokenTypes::$aTypes['eof']) $this->raise($this->pos, "Unterminated template literal")
+      $this->fnExpect(TokenTypes::$aTypes['dollarBraceL'])
+      node.expressions.push($this->parseExpression())
+      $this->fnExpect(TokenTypes::$aTypes['braceR'])
+      node.quasis.push(curElt = $this->parseTemplateElement({isTagged}))
+    }
+    $this->fnNext()
+    return $this->fnFinishNode(node, "TemplateLiteral")
+  }
+
+  public function fnisAsyncProp = function(prop) {
+    return !prop.computed && prop.key.type === "Identifier" && prop.key.name === "async" &&
+      ($this->type === TokenTypes::$aTypes['name'] || $this->type === TokenTypes::$aTypes['num'] || $this->type === TokenTypes::$aTypes['string'] || $this->type === TokenTypes::$aTypes['bracketL'] || $this->type.keyword || ($this->aOptions['ecmaVersion'] >= 9 && $this->type === TokenTypes::$aTypes['star'])) &&
+      !lineBreak.test($this->input.slice($this->lastTokEnd, $this->start))
+  }
+
+  // Parse an object literal or binding pattern.
+
+  public function fnparseObj = function(isPattern, $oRefDestructuringErrors) {
+    let node = $this->fnStartNode(), first = true, propHash = {}
+    node.properties = []
+    $this->fnNext()
+    while (!$this->fnEat(TokenTypes::$aTypes['braceR'])) {
+      if (!first) {
+        $this->fnExpect(TokenTypes::$aTypes['comma'])
+        if ($this->afterTrailingComma(TokenTypes::$aTypes['braceR'])) break
+      } else first = false
+
+      const prop = $this->parseProperty(isPattern, $oRefDestructuringErrors)
+      if (!isPattern) $this->checkPropClash(prop, propHash, $oRefDestructuringErrors)
+      node.properties.push(prop)
+    }
+    return $this->fnFinishNode(node, isPattern ? "ObjectPattern" : "ObjectExpression")
+  }
+
+  public function fnparseProperty = function(isPattern, $oRefDestructuringErrors) {
+    let prop = $this->fnStartNode(), isGenerator, isAsync, startPos, startLoc
+    if ($this->aOptions['ecmaVersion'] >= 9 && $this->fnEat(TokenTypes::$aTypes['ellipsis'])) {
+      if (isPattern) {
+        prop.argument = $this->parseIdent(false)
+        if ($this->type === TokenTypes::$aTypes['comma']) {
+          $this->raise($this->start, "Comma is not permitted after the rest element")
+        }
+        return $this->fnFinishNode(prop, "RestElement")
+      }
+      // To disallow parenthesized identifier via `$this->toAssignable()`.
+      if ($this->type === TokenTypes::$aTypes['parenL'] && $oRefDestructuringErrors) {
+        if ($oRefDestructuringErrors.parenthesizedAssign < 0) {
+          $oRefDestructuringErrors.parenthesizedAssign = $this->start
+        }
+        if ($oRefDestructuringErrors.parenthesizedBind < 0) {
+          $oRefDestructuringErrors.parenthesizedBind = $this->start
+        }
+      }
+      // Parse argument.
+      prop.argument = $this->fnParseMaybeAssign(false, $oRefDestructuringErrors)
+      // To disallow trailing comma via `$this->toAssignable()`.
+      if ($this->type === TokenTypes::$aTypes['comma'] && $oRefDestructuringErrors && $oRefDestructuringErrors.trailingComma < 0) {
+        $oRefDestructuringErrors.trailingComma = $this->start
+      }
+      // Finish
+      return $this->fnFinishNode(prop, "SpreadElement")
+    }
+    if ($this->aOptions['ecmaVersion'] >= 6) {
+      prop.method = false
+      prop.shorthand = false
+      if (isPattern || $oRefDestructuringErrors) {
+        startPos = $this->start
+        startLoc = $this->startLoc
+      }
+      if (!isPattern)
+        isGenerator = $this->fnEat(TokenTypes::$aTypes['star'])
+    }
+    let containsEsc = $this->containsEsc
+    $this->parsePropertyName(prop)
+    if (!isPattern && !containsEsc && $this->aOptions['ecmaVersion'] >= 8 && !isGenerator && $this->isAsyncProp(prop)) {
+      isAsync = true
+      isGenerator = $this->aOptions['ecmaVersion'] >= 9 && $this->fnEat(TokenTypes::$aTypes['star'])
+      $this->parsePropertyName(prop, $oRefDestructuringErrors)
+    } else {
+      isAsync = false
+    }
+    $this->parsePropertyValue(prop, isPattern, isGenerator, isAsync, startPos, startLoc, $oRefDestructuringErrors, containsEsc)
+    return $this->fnFinishNode(prop, "Property")
+  }
+
+  public function fnparsePropertyValue = function(prop, isPattern, isGenerator, isAsync, startPos, startLoc, $oRefDestructuringErrors, containsEsc) {
+    if ((isGenerator || isAsync) && $this->type === TokenTypes::$aTypes['colon'])
+      $this->unexpected()
+
+    if ($this->fnEat(TokenTypes::$aTypes['colon'])) {
+      prop.value = isPattern ? $this->parseMaybeDefault($this->start, $this->startLoc) : $this->fnParseMaybeAssign(false, $oRefDestructuringErrors)
+      prop.kind = "init"
+    } else if ($this->aOptions['ecmaVersion'] >= 6 && $this->type === TokenTypes::$aTypes['parenL']) {
+      if (isPattern) $this->unexpected()
+      prop.kind = "init"
+      prop.method = true
+      prop.value = $this->parseMethod(isGenerator, isAsync)
+    } else if (!isPattern && !containsEsc &&
+               $this->aOptions['ecmaVersion'] >= 5 && !prop.computed && prop.key.type === "Identifier" &&
+               (prop.key.name === "get" || prop.key.name === "set") &&
+               ($this->type !== TokenTypes::$aTypes['comma'] && $this->type !== TokenTypes::$aTypes['braceR'])) {
+      if (isGenerator || isAsync) $this->unexpected()
+      prop.kind = prop.key.name
+      $this->parsePropertyName(prop)
+      prop.value = $this->parseMethod(false)
+      let paramCount = prop.kind === "get" ? 0 : 1
+      if (prop.value.params.length !== paramCount) {
+        let start = prop.value.start
+        if (prop.kind === "get")
+          $this->fnRaiseRecoverable(start, "getter should have no params")
+        else
+          $this->fnRaiseRecoverable(start, "setter should have exactly one param")
+      } else {
+        if (prop.kind === "set" && prop.value.params[0].type === "RestElement")
+          $this->fnRaiseRecoverable(prop.value.params[0].start, "Setter cannot use rest params")
+      }
+    } else if ($this->aOptions['ecmaVersion'] >= 6 && !prop.computed && prop.key.type === "Identifier") {
+      $this->checkUnreserved(prop.key)
+      prop.kind = "init"
+      if (isPattern) {
+        prop.value = $this->parseMaybeDefault(startPos, startLoc, prop.key)
+      } else if ($this->type === TokenTypes::$aTypes['eq'] && $oRefDestructuringErrors) {
+        if ($oRefDestructuringErrors.shorthandAssign < 0)
+          $oRefDestructuringErrors.shorthandAssign = $this->start
+        prop.value = $this->parseMaybeDefault(startPos, startLoc, prop.key)
+      } else {
+        prop.value = prop.key
+      }
+      prop.shorthand = true
+    } else $this->unexpected()
+  }
+
+  public function fnparsePropertyName = function(prop) {
+    if ($this->aOptions['ecmaVersion'] >= 6) {
+      if ($this->fnEat(TokenTypes::$aTypes['bracketL'])) {
+        prop.computed = true
+        prop.key = $this->fnParseMaybeAssign()
+        $this->fnExpect(TokenTypes::$aTypes['bracketR'])
+        return prop.key
+      } else {
+        prop.computed = false
+      }
+    }
+    return prop.key = $this->type === TokenTypes::$aTypes['num'] || $this->type === TokenTypes::$aTypes['string'] ? $this->fnParseExprAtom() : $this->parseIdent(true)
+  }
+
+  // Initialize empty function node.
+
+  public function fninitFunction = function(node) {
+    node.id = null
+    if ($this->aOptions['ecmaVersion'] >= 6) node.generator = node.expression = false
+    if ($this->aOptions['ecmaVersion'] >= 8) node.async = false
+  }
+
+  // Parse object or class method.
+
+  public function fnparseMethod = function(isGenerator, isAsync) {
+    let node = $this->fnStartNode(), oldYieldPos = $this->yieldPos, oldAwaitPos = $this->awaitPos
+
+    $this->initFunction(node)
+    if ($this->aOptions['ecmaVersion'] >= 6)
+      node.generator = isGenerator
+    if ($this->aOptions['ecmaVersion'] >= 8)
+      node.async = !!isAsync
+
+    $this->yieldPos = 0
+    $this->awaitPos = 0
+    $this->enterScope(functionFlags(isAsync, node.generator))
+
+    $this->fnExpect(TokenTypes::$aTypes['parenL'])
+    node.params = $this->parseBindingList(TokenTypes::$aTypes['parenR'], false, $this->aOptions['ecmaVersion'] >= 8)
+    $this->checkYieldAwaitInDefaultParams()
+    $this->parseFunctionBody(node, false)
+
+    $this->yieldPos = oldYieldPos
+    $this->awaitPos = oldAwaitPos
+    return $this->fnFinishNode(node, "FunctionExpression")
+  }
+
+  // Parse arrow function expression with given parameters.
+
+  public function fnparseArrowExpression = function(node, params, isAsync) {
+    let oldYieldPos = $this->yieldPos, oldAwaitPos = $this->awaitPos
+
+    $this->enterScope(functionFlags(isAsync, false) | SCOPE_ARROW)
+    $this->initFunction(node)
+    if ($this->aOptions['ecmaVersion'] >= 8) node.async = !!isAsync
+
+    $this->yieldPos = 0
+    $this->awaitPos = 0
+
+    node.params = $this->toAssignableList(params, true)
+    $this->parseFunctionBody(node, true)
+
+    $this->yieldPos = oldYieldPos
+    $this->awaitPos = oldAwaitPos
+    return $this->fnFinishNode(node, "ArrowFunctionExpression")
+  }
+
+  // Parse function body and check parameters.
+
+  public function fnparseFunctionBody = function(node, isArrowFunction) {
+    let isExpression = isArrowFunction && $this->type !== TokenTypes::$aTypes['braceL']
+    let oldStrict = $this->strict, useStrict = false
+
+    if (isExpression) {
+      node.body = $this->fnParseMaybeAssign()
+      node.expression = true
+      $this->checkParams(node, false)
+    } else {
+      let nonSimple = $this->aOptions['ecmaVersion'] >= 7 && !$this->isSimpleParamList(node.params)
+      if (!oldStrict || nonSimple) {
+        useStrict = $this->strictDirective($this->end)
+        // If this is a strict mode function, verify that argument names
+        // are not repeated, and it does not try to bind the words `eval`
+        // or `arguments`.
+        if (useStrict && nonSimple)
+          $this->fnRaiseRecoverable(node.start, "Illegal 'use strict' directive in function with non-simple parameter list")
+      }
+      // Start a new scope with regard to labels and the `inFunction`
+      // flag (restore them to their old value afterwards).
+      let oldLabels = $this->labels
+      $this->labels = []
+      if (useStrict) $this->strict = true
+
+      // Add the params to varDeclaredNames to ensure that an error is thrown
+      // if a let/const declaration in the function clashes with one of the params.
+      $this->checkParams(node, !oldStrict && !useStrict && !isArrowFunction && $this->isSimpleParamList(node.params))
+      node.body = $this->parseBlock(false)
+      node.expression = false
+      $this->adaptDirectivePrologue(node.body.body)
+      $this->labels = oldLabels
+    }
+    $this->exitScope()
+
+    // Ensure the function name isn't a forbidden identifier in strict mode, e.g. 'eval'
+    if ($this->strict && node.id) $this->fnCheckLVal(node.id, BIND_OUTSIDE)
+    $this->strict = oldStrict
+  }
+
+  public function fnisSimpleParamList = function(params) {
+    for (let param of params)
+      if (param.type !== "Identifier") return false
+    return true
+  }
+
+  // Checks function params for various disallowed patterns such as using "eval"
+  // or "arguments" and duplicate parameters.
+
+  public function fncheckParams = function(node, allowDuplicates) {
+    let nameHash = {}
+    for (let param of node.params)
+      $this->fnCheckLVal(param, BIND_VAR, allowDuplicates ? null : nameHash)
+  }
+
+  // Parses a comma-separated list of expressions, and returns them as
+  // an array. `close` is the token type that ends the list, and
+  // `allowEmpty` can be turned on to allow subsequent commas with
+  // nothing in between them to be parsed as `null` (which is needed
+  // for array literals).
+
+  public function fnparseExprList = function(close, allowTrailingComma, allowEmpty, $oRefDestructuringErrors) {
+    let elts = [], first = true
+    while (!$this->fnEat(close)) {
+      if (!first) {
+        $this->fnExpect(TokenTypes::$aTypes['comma'])
+        if (allowTrailingComma && $this->afterTrailingComma(close)) break
+      } else first = false
+
+      let elt
+      if (allowEmpty && $this->type === TokenTypes::$aTypes['comma'])
+        elt = null
+      else if ($this->type === TokenTypes::$aTypes['ellipsis']) {
+        elt = $this->parseSpread($oRefDestructuringErrors)
+        if ($oRefDestructuringErrors && $this->type === TokenTypes::$aTypes['comma'] && $oRefDestructuringErrors.trailingComma < 0)
+          $oRefDestructuringErrors.trailingComma = $this->start
+      } else {
+        elt = $this->fnParseMaybeAssign(false, $oRefDestructuringErrors)
+      }
+      elts.push(elt)
+    }
+    return elts
+  }
+
+  public function fncheckUnreserved = function({start, end, name}) {
+    if ($this->fnInGenerator() && name === "yield")
+      $this->fnRaiseRecoverable(start, "Can not use 'yield' as identifier inside a generator")
+    if ($this->inAsync && name === "await")
+      $this->fnRaiseRecoverable(start, "Can not use 'await' as identifier inside an async function")
+    if ($this->keywords.test(name))
+      $this->raise(start, `Unexpected keyword '${name}'`)
+    if ($this->aOptions['ecmaVersion'] < 6 &&
+      $this->input.slice(start, end).indexOf("\\") !== -1) return
+    const re = $this->strict ? $this->reservedWordsStrict : $this->reservedWords
+    if (re.test(name)) {
+      if (!$this->inAsync && name === "await")
+        $this->fnRaiseRecoverable(start, "Can not use keyword 'await' outside an async function")
+      $this->fnRaiseRecoverable(start, `The keyword '${name}' is reserved`)
+    }
+  }
+
+  // Parse the next token as an identifier. If `liberal` is true (used
+  // when parsing properties), it will also convert keywords into
+  // identifiers.
+
+  public function fnparseIdent = function(liberal, isBinding) {
+    let node = $this->fnStartNode()
+    if (liberal && $this->options.allowReserved === "never") liberal = false
+    if ($this->type === TokenTypes::$aTypes['name']) {
+      node.name = $this->value
+    } else if ($this->type.keyword) {
+      node.name = $this->type.keyword
+
+      // To fix https://github.com/acornjs/acorn/issues/575
+      // `class` and `function` keywords push new context into $this->context.
+      // But there is no chance to pop the context if the keyword is consumed as an identifier such as a property name.
+      // If the previous token is a dot, this does not apply because the context-managing code already ignored the keyword
+      if ((node.name === "class" || node.name === "function") &&
+          ($this->lastTokEnd !== $this->lastTokStart + 1 || $this->input.charCodeAt($this->lastTokStart) !== 46)) {
+        $this->context.pop()
+      }
+    } else {
+      $this->unexpected()
+    }
+    $this->fnNext()
+    $this->fnFinishNode(node, "Identifier")
+    if (!liberal) $this->checkUnreserved(node)
+    return node
+  }
+
+  // Parses yield expression inside generator.
+
+  public function fnparseYield = function() {
+    if (!$this->yieldPos) $this->yieldPos = $this->start
+
+    let node = $this->fnStartNode()
+    $this->fnNext()
+    if ($this->type === TokenTypes::$aTypes['semi'] || $this->fnCanInsertSemicolon() || ($this->type !== TokenTypes::$aTypes['star'] && !$this->type.startsExpr)) {
+      node.delegate = false
+      node.argument = null
+    } else {
+      node.delegate = $this->fnEat(TokenTypes::$aTypes['star'])
+      node.argument = $this->fnParseMaybeAssign()
+    }
+    return $this->fnFinishNode(node, "YieldExpression")
+  }
+
+  public function fnparseAwait = function() {
+    if (!$this->awaitPos) $this->awaitPos = $this->start
+
+    let node = $this->fnStartNode()
+    $this->fnNext()
+    node.argument = $this->fnParseMaybeUnary(null, true)
+    return $this->fnFinishNode(node, "AwaitExpression")
+  }
+  
+  public function fnInFunction() 
   { 
     return ($this->fnCurrentVarScope()->iFlags & Scope::SCOPE_FUNCTION) > 0;
   }
   
-  public function inGenerator() 
+  public function fnInGenerator() 
   { 
     return ($this->fnCurrentVarScope()->iFlags & Scope::SCOPE_GENERATOR) > 0; 
   }
-  public function inAsync() 
+  public function fnInAsync() 
   {
     return ($this->fnCurrentVarScope()->iFlags & Scope::SCOPE_ASYNC) > 0;
   }
