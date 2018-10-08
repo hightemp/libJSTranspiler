@@ -1114,7 +1114,7 @@ class Parser
         // check for keywords used as local names
         //for (let spec of node.specifiers) {
         foreach ($oNode->oSpecifiers as $oSpec) {
-          $this->fnCheckUnreserved($oSpec->local);
+          $this->fnCheckUnreserved($oSpec->oLocal);
         }
 
         $oNode->oSource = null;
@@ -1256,7 +1256,7 @@ class Parser
       if ($this->fnEatContextual("as")) {
         $oNode->oLocal = $this->fnParseIdent();
       } else {
-        $this->fnCheckUnreserved(node.imported);
+        $this->fnCheckUnreserved($oNode->oImported);
         $oNode->oLocal = $oNode->oImported;
       }
       $this->fnCheckLVal($oNode->oLocal, Scope::BIND_LEXICAL);
@@ -3726,21 +3726,25 @@ class Parser
     return $aElts;
   }
 
-  public function fnCheckUnreserved({start, end, name}) 
+  public function fnCheckUnreserved($oNode) 
   {
-    if ($this->fnInGenerator() && name === "yield")
-      $this->fnRaiseRecoverable(start, "Can not use 'yield' as identifier inside a generator")
-    if ($this->inAsync && name === "await")
-      $this->fnRaiseRecoverable(start, "Can not use 'await' as identifier inside an async function")
-    if ($this->keywords.test(name))
-      $this->fnRaise(start, `Unexpected keyword '${name}'`)
-    if ($this->aOptions['ecmaVersion'] < 6 &&
-      $this->input.slice(start, end).indexOf("\\") !== -1) return
-    const re = $this->strict ? $this->reservedWordsStrict : $this->reservedWords
-    if (re.test(name)) {
-      if (!$this->inAsync && name === "await")
-        $this->fnRaiseRecoverable(start, "Can not use keyword 'await' outside an async function")
-      $this->fnRaiseRecoverable(start, `The keyword '${name}' is reserved`)
+    $iStart = $oNode->iStart;
+    $iEnd = $oNode->iEnd;
+    $sName = $oNode->sName;
+    if ($this->fnInGenerator() && $sName === "yield")
+      $this->fnRaiseRecoverable($iStart, "Can not use 'yield' as identifier inside a generator");
+    if ($this->inAsync && $sName === "await")
+      $this->fnRaiseRecoverable($iStart, "Can not use 'await' as identifier inside an async function");
+    if (preg_match($this->keywords, $sName))
+      $this->fnRaise($iStart, "Unexpected keyword '{$sName}'");
+    if ($this->aOptions['ecmaVersion'] < 6 
+        && strstr(mb_substr($this->sInput, $iStart, $iEnd - $iStart), "\\") !== false) 
+      return;
+    $sRe = $this->bStrict ? $this->sReservedWordsStrict : $this->sReservedWords;
+    if (preg_match($sRe, $sName)) {
+      if (!$this->bInAsync && $sName === "await")
+        $this->fnRaiseRecoverable($iStart, "Can not use keyword 'await' outside an async function");
+      $this->fnRaiseRecoverable($iStart, "The keyword '{$sName}' is reserved");
     }
   }
 
