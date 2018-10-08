@@ -43,6 +43,7 @@ class Node
   public $bComputed;
   public $sValue;
   public $oValue;
+  public $mValue;
   public $bSuperClass;
   public $oSource;
   public $oDeclaration;
@@ -58,6 +59,17 @@ class Node
   public $bShorthand;
   public $aExpressions;
   public $bPrefix;
+  public $oProperty;
+  public $oCallee;
+  public $aArguments;
+  public $oTag;
+  public $oQuasi;
+  public $aQuasis;
+  public $aRegex;
+  public $sRaw;
+  public $oMeta;
+  public $bTail;
+  public $oKey;
   
   public function __construct($oParser, $iPos, $oLoc)
   {
