@@ -14,6 +14,8 @@ use libJSTranspiler\Utilities;
 use libJSTranspiler\Scope;
 use libJSTranspiler\Label;
 use libJSTranspiler\DestructuringErrors;
+use libJSTranspiler\Position;
+use libJSTranspiler\SyntaxError;
 use Closure;
 use Exception;
 
@@ -281,7 +283,7 @@ class Parser
     $aExports = [];
     if (!$oNode->aBody)
       $oNode->aBody = [];
-    while ($this->oType !== TokenTypes::$aTypes['eof']) {
+    while ($this->oType != TokenTypes::$aTypes['eof']) {
       $mStmt = $this->fnParseStatement(null, true, $aExports);
       array_push($oNode->aBody, $mStmt);
     }
@@ -453,7 +455,7 @@ class Parser
     if ($this->fnEat(TokenTypes::$aTypes['semi']) 
         || $this->fnInsertSemicolon()) 
       $oNode->oLabel = null;
-    else if ($this->oType !== TokenTypes::$aTypes['name']) 
+    else if ($this->oType != TokenTypes::$aTypes['name']) 
       $this->fnUnexpected();
     else {
       $oNode->oLabel = $this->fnParseIdent();
@@ -526,28 +528,28 @@ class Parser
     $this->fnEnterScope(0);
     $this->fnExpect(TokenTypes::$aTypes['parenL']);
     
-    if ($this->oType === TokenTypes::$aTypes['semi']) {
+    if ($this->oType == TokenTypes::$aTypes['semi']) {
       if ($iAwaitAt > -1) 
         $this->fnUnexpected($iAwaitAt);
       return $this->parseFor($oNode, null);
     }
     
     $bIsLet = $this->fnIsLet();
-    if ($this->oType === TokenTypes::$aTypes['var'] 
-        || $this->oType === TokenTypes::$aTypes['const'] 
+    if ($this->oType == TokenTypes::$aTypes['var'] 
+        || $this->oType == TokenTypes::$aTypes['const'] 
         || $bIsLet) {
       $oInit = $this->fnStartNode();
       $sKind = $bIsLet ? "let" : $this->mValue;
       $this->fnNext();
       $this->fnParseVar($oInit, true, $sKind);
       $this->fnFinishNode($oInit, "VariableDeclaration");
-      if (($this->oType === TokenTypes::$aTypes['in'] 
+      if (($this->oType == TokenTypes::$aTypes['in'] 
            || ($this->aOptions['ecmaVersion'] >= 6 
               && $this->fnIsContextual("of"))) 
           && count($oInit->aDeclarations) === 1 
           && !($sKind !== "var" && $oInit->aDeclarations[0]->init)) {
         if ($this->aOptions['ecmaVersion'] >= 9) {
-          if ($this->oType === TokenTypes::$aTypes['in']) {
+          if ($this->oType == TokenTypes::$aTypes['in']) {
             if ($iAwaitAt > -1) 
               $this->fnUnexpected($iAwaitAt);
           } else 
@@ -562,11 +564,11 @@ class Parser
     
     $oRefDestructuringErrors = new DestructuringErrors();
     $oInit = $this->fnParseExpression(true, $oRefDestructuringErrors);
-    if ($this->oType === TokenTypes::$aTypes['in'] 
+    if ($this->oType == TokenTypes::$aTypes['in'] 
         || ($this->aOptions['ecmaVersion'] >= 6 
             && $this->fnIsContextual("of"))) {
       if ($this->aOptions['ecmaVersion'] >= 9) {
-        if ($this->oType === TokenTypes::$aTypes['in']) {
+        if ($this->oType == TokenTypes::$aTypes['in']) {
           if ($iAwaitAt > -1) 
             $this->fnUnexpected($iAwaitAt);
         } else 
@@ -642,10 +644,10 @@ class Parser
     // adding statements to.
 
     $oCur;
-    for ($bSawDefault = false; $this->oType !== TokenTypes::$aTypes['braceR'];) {
-      if ($this->oType === TokenTypes::$aTypes['case'] 
-          || $this->oType === TokenTypes::$aTypes['default']) {
-        $bIsCase = $this->oType === TokenTypes::$aTypes['case'];
+    for ($bSawDefault = false; $this->oType != TokenTypes::$aTypes['braceR'];) {
+      if ($this->oType == TokenTypes::$aTypes['case'] 
+          || $this->oType == TokenTypes::$aTypes['default']) {
+        $bIsCase = $this->oType == TokenTypes::$aTypes['case'];
         if ($oCur) 
           $this->fnFinishNode($oCur, "SwitchCase");
         array_push($oNode->aCases, $oCur = $this->fnStartNode());
@@ -692,7 +694,7 @@ class Parser
     $this->fnNext();
     $oNode->oBlock = $this->parseBlock();
     $oNode->oHandler = null;
-    if ($this->oType === TokenTypes::$aTypes['catch']) {
+    if ($this->oType == TokenTypes::$aTypes['catch']) {
       $oClause = $this->fnStartNode();
       $this->fnNext();
       if ($this->fnEat(TokenTypes::$aTypes['parenL'])) {
@@ -714,7 +716,7 @@ class Parser
     $oNode->oFinalizer = $this->fnEat(TokenTypes::$aTypes['finally']) ? $this->fnParseBlock() : null;
     if (!$oNode->oHandler && !$oNode->oFinalizer)
       $this->fnRaise($oNode->iStart, "Missing catch or finally clause");
-    return $this->fnFinishNode(node, "TryStatement");
+    return $this->fnFinishNode($oNode, "TryStatement");
   }
 
   public function fnParseVarStatement(&$oNode, $sKind)
@@ -742,7 +744,7 @@ class Parser
     $this->fnNext();
     $oNode->oObject = $this->fnParseParenExpression();
     $oNode->aBody = $this->fnParseStatement("with");
-    return $this->fnFinishNode(node, "WithStatement");
+    return $this->fnFinishNode($oNode, "WithStatement");
   }
 
   public function fnParseEmptyStatement(&$oNode)
@@ -757,7 +759,7 @@ class Parser
       if ($oLabel->name === $sMaybeName)
         $this->fnRaise($oExpr->iStart, "Label '$sMaybeName' is already declared");
     
-    $sKind = $this->oType->bIsLoop ? "loop" : $this->oType === TokenTypes::$aTypes['switch'] ? "switch" : null;
+    $sKind = $this->oType->bIsLoop ? "loop" : $this->oType == TokenTypes::$aTypes['switch'] ? "switch" : null;
             
     for ($iI = count($this->aLabels) - 1; $iI >= 0; $iI--) {
       $oLabel = $this->aLabels[$iI];
@@ -809,7 +811,7 @@ class Parser
     }
     if ($bCreateNewLexicalScope) 
       $this->fnExitScope();
-    return $this->fnFinishNode(node, "BlockStatement");
+    return $this->fnFinishNode($oNode, "BlockStatement");
   }
 
   // Parse a regular `for` loop. The disambiguation code in
@@ -820,9 +822,9 @@ class Parser
   {
     $oNode->oInit = $oInit;
     $this->fnExpect(TokenTypes::$aTypes['semi']);
-    $oNode->oTest = $this->oType === TokenTypes::$aTypes['semi'] ? null : $this->fnParseExpression();
+    $oNode->oTest = $this->oType == TokenTypes::$aTypes['semi'] ? null : $this->fnParseExpression();
     $this->fnExpect(TokenTypes::$aTypes['semi']);
-    $oNode->oUpdate = $this->oType === TokenTypes::$aTypes['parenR'] ? null : $this->fnParseExpression();
+    $oNode->oUpdate = $this->oType == TokenTypes::$aTypes['parenR'] ? null : $this->fnParseExpression();
     $this->fnExpect(TokenTypes::$aTypes['parenR']);
     $this->fnExitScope();
     $oNode->aBody = $this->fnParseStatement("for");
@@ -835,7 +837,7 @@ class Parser
 
   public function fnParseForIn(&$oNode, $oInit)
   {
-    $sType = $this->oType === TokenTypes::$aTypes['in'] ? "ForInStatement" : "ForOfStatement";
+    $sType = $this->oType == TokenTypes::$aTypes['in'] ? "ForInStatement" : "ForOfStatement";
     $this->fnNext();
     if ($sType === "ForInStatement") {
       if ($oInit->sType === "AssignmentPattern" ||
@@ -864,13 +866,13 @@ class Parser
       if ($this->fnEat(TokenTypes::$aTypes['eq'])) {
         $oDecl->oInit = $this->fnParseMaybeAssign($bIsFor);
       } else if ($sKind === "const" 
-                  && !($this->oType === TokenTypes::$aTypes['in'] 
+                  && !($this->oType == TokenTypes::$aTypes['in'] 
                        || ($this->aOptions['ecmaVersion'] >= 6 
                            && $this->fnIsContextual("of")))) {
         $this->fnUnexpected();
       } else if ($oDecl->oId->type !== "Identifier" 
                  && !($bIsFor 
-                      && ($this->oType === TokenTypes::$aTypes['in'] 
+                      && ($this->oType == TokenTypes::$aTypes['in'] 
                           || $this->fnIsContextual("of")))) {
         $this->fnRaise($this->iLastTokEnd, "Complex binding patterns require an initialization value");
       } else {
@@ -903,7 +905,7 @@ class Parser
       $oNode->bAsync = !!$bIsAsync;
 
     if ($iStatement & self::FUNC_STATEMENT) {
-      $oNode->oId = ($iStatement & self::FUNC_NULLABLE_ID) && $this->oType !== TokenTypes::$aTypes['name'] ? null : $this->fnParseIdent();
+      $oNode->oId = ($iStatement & self::FUNC_NULLABLE_ID) && $this->oType != TokenTypes::$aTypes['name'] ? null : $this->fnParseIdent();
       if ($oNode->oId && !($iStatement & self::FUNC_HANGING_STATEMENT))
         $this->fnCheckLVal($oNode->oId, $this->bInModule && !$this->fnInFunction() ? Scope::BIND_LEXICAL : Scope::BIND_FUNCTION);
     }
@@ -915,7 +917,7 @@ class Parser
     $this->fnEnterScope(Scope::fnFunctionFlags($oNode->bAsync, $oNode->bGenerator));
 
     if (!($iStatement & self::FUNC_STATEMENT))
-      $oNode->oId = $this->oType === TokenTypes::$aTypes['name'] ? $this->fnParseIdent() : null;
+      $oNode->oId = $this->oType == TokenTypes::$aTypes['name'] ? $this->fnParseIdent() : null;
 
     $this->fnParseFunctionParams($oNode);
     $this->fnParseFunctionBody($oNode, $bAllowExpressionBody);
@@ -974,7 +976,7 @@ class Parser
       
       if (!$this->fnEatContextual($sK)) 
         return false;
-      if ($this->oType !== TokenTypes::$aTypes['parenL'] 
+      if ($this->oType != TokenTypes::$aTypes['parenL'] 
           && (!$bNoLineBreak 
               || !$this->fnCanInsertSemicolon())) 
         return true;
@@ -1047,7 +1049,7 @@ class Parser
 
   public function fnParseClassId(&$oNode, $bIsStatement)
   {
-    $oNode->oId = $this->oType === TokenTypes::$aTypes['name'] ? 
+    $oNode->oId = $this->oType == TokenTypes::$aTypes['name'] ? 
       $this->fnParseIdent() : 
       $bIsStatement === true ? 
         $this->fnUnexpected() : 
@@ -1069,7 +1071,7 @@ class Parser
     // export * from '...'
     if ($this->fnEat(TokenTypes::$aTypes['star'])) {
       $this->fnExpectContextual("from");
-      if ($this->oType !== TokenTypes::$aTypes['string']) 
+      if ($this->oType != TokenTypes::$aTypes['string']) 
         $this->fnUnexpected();
       $oNode->oSource = $this->fnParseExprAtom();
       $this->fnSemicolon();
@@ -1078,14 +1080,14 @@ class Parser
     if ($this->fnEat(TokenTypes::$aTypes['default'])) { // export default ...
       $this->fnCheckExport(exports, "default", $this->lastTokStart);
       $bIsAsync;
-      if ($this->oType === TokenTypes::$aTypes['function'] 
+      if ($this->oType == TokenTypes::$aTypes['function'] 
           || ($bIsAsync = $this->fnIsAsyncFunction())) {
         $oFNode = $this->fnStartNode();
         $this->fnNext();
         if ($bIsAsync) 
           $this->fnNext();
         $oNode->oDeclaration = $this->fnParseFunction($oFNode, self::FUNC_STATEMENT | self::FUNC_NULLABLE_ID, false, $bIsAsync, true);
-      } else if ($this->oType === TokenTypes::$aTypes['class']) {
+      } else if ($this->oType == TokenTypes::$aTypes['class']) {
         $oCNode = $this->fnStartNode();
         $oNode->oDeclaration = $this->fnParseClass($oCNode, "nullableID");
       } else {
@@ -1107,7 +1109,7 @@ class Parser
       $oNode->oDeclaration = null;
       $oNode->oSpecifiers = $this->fnParseExportSpecifiers($aExports);
       if ($this->fnEatContextual("from")) {
-        if ($this->oType !== TokenTypes::$aTypes['string']) 
+        if ($this->oType != TokenTypes::$aTypes['string']) 
           $this->fnUnexpected();
         $oNode->oSource = $this->fnParseExprAtom();
       } else {
@@ -1206,16 +1208,16 @@ class Parser
   {
     $this->fnNext();
     // import '...'
-    if ($this->oType === TokenTypes::$aTypes['string']) {
+    if ($this->oType == TokenTypes::$aTypes['string']) {
       $oNode->oSpecifiers = [];
       $oNode->oSource = $this->fnParseExprAtom();
     } else {
       $oNode->oSpecifiers = $this->fnParseImportSpecifiers();
       $this->fnExpectContextual("from");
-      $oNode->oSource = $this->oType === TokenTypes::$aTypes['string'] ? $this->fnParseExprAtom() : $this->fnUnexpected();
+      $oNode->oSource = $this->oType == TokenTypes::$aTypes['string'] ? $this->fnParseExprAtom() : $this->fnUnexpected();
     }
     $this->fnSemicolon();
-    return $this->fnFinishNode(node, "ImportDeclaration");
+    return $this->fnFinishNode($oNode, "ImportDeclaration");
   }
 
   // Parses a comma-separated list of module imports.
@@ -1224,7 +1226,7 @@ class Parser
   {
     $aNodes = [];
     $bFirst = true;
-    if ($this->oType === TokenTypes::$aTypes['name']) {
+    if ($this->oType == TokenTypes::$aTypes['name']) {
       // import defaultObj, { x, y as z } from '...'
       $oNode = $this->fnStartNode();
       $oNode->oLocal = $this->fnParseIdent();
@@ -1233,7 +1235,7 @@ class Parser
       if (!$this->fnEat(TokenTypes::$aTypes['comma'])) 
         return $aNodes;
     }
-    if ($this->oType === TokenTypes::$aTypes['star']) {
+    if ($this->oType == TokenTypes::$aTypes['star']) {
       $oNode = $this->fnStartNode();
       $this->fnNext();
       $this->fnExpectContextual("as");
@@ -1479,7 +1481,7 @@ class Parser
   
   public function fnEat($oType) 
   {
-    if ($this->oType === $oType) {
+    if ($this->oType == $oType) {
       $this->fnNext();
       return true;
     } else {
@@ -1491,7 +1493,7 @@ class Parser
 
   public function fnIsContextual($sName) 
   {
-    return $this->oType === TokenTypes::$aTypes['name']
+    return $this->oType == TokenTypes::$aTypes['name']
       && $this->mValue === $sName 
       && !$this->bContainsEsc;
   }
@@ -1518,8 +1520,8 @@ class Parser
 
   public function fnCanInsertSemicolon() 
   {
-    return $this->oType === TokenTypes::$aTypes['eof'] ||
-      $this->oType === TokenTypes::$aTypes['braceR'] ||
+    return $this->oType == TokenTypes::$aTypes['eof'] ||
+      $this->oType == TokenTypes::$aTypes['braceR'] ||
       preg_match(Whitespace::lineBreak, mb_substr($this->sInput, $this->iLastTokEnd, $this->iStart - $this->iLastTokEnd));
   }
 
@@ -1544,7 +1546,7 @@ class Parser
 
   public function fnAfterTrailingComma($oTokType, $bNotNext) 
   {
-    if ($this->oType === $oTokType) {
+    if ($this->oType == $oTokType) {
       if (is_callable($this->aOptions['onTrailingComma']))
         $this->aOptions['onTrailingComma']($this->iLastTokStart, $this->oLastTokStartLoc);
       if (!$bNotNext)
@@ -1976,7 +1978,7 @@ class Parser
     return $this->fnFinishOp($iCode === 61 ? TokenTypes::$aTypes['eq'] : TokenTypes::$aTypes['prefix'], 1);
   }
 
-  public function getTokenFromCode($iCode) 
+  public function fnGetTokenFromCode($iCode) 
   {
     switch ($iCode) {
       // The interpretation of a dot depends on whether it is followed
@@ -2298,8 +2300,8 @@ class Parser
       
       if ($iCh === 96 || $iCh === 36 && Utilities::fnGetCharAt($this->sInput, $this->iPos + 1) === 123) { // '`', '${'
         if ($this->iPos === $this->iStart 
-            && ($this->oType === TokenTypes::$aTypes['template'] 
-                || $this->oType === TokenTypes::$aTypes['invalidTemplate'])
+            && ($this->oType == TokenTypes::$aTypes['template'] 
+                || $this->oType == TokenTypes::$aTypes['invalidTemplate'])
            ) {
           if ($iCh === 36) {
             $this->iPos += 2;
@@ -2615,7 +2617,7 @@ class Parser
 
     // RestElement inside of a function parameter must be an identifier
     if ($this->aOptions['ecmaVersion'] === 6 
-        && $this->oType !== TokenTypes::$aTypes['name']) 
+        && $this->oType != TokenTypes::$aTypes['name']) 
       $this->fnUnexpected();
 
     $oNode->oArgument = $this->fnParseBindingAtom();
@@ -2651,15 +2653,15 @@ class Parser
         $bFirst = false;
       else 
         $this->fnExpect(TokenTypes::$aTypes['comma']);
-      if ($bAllowEmpty && $this->oType === TokenTypes::$aTypes['comma']) {
+      if ($bAllowEmpty && $this->oType == TokenTypes::$aTypes['comma']) {
         array_push($aElts, null);
       } else if ($bAllowTrailingComma && $this->fnAfterTrailingComma($oClose)) {
         break;
-      } else if ($this->oType === TokenTypes::$aTypes['ellipsis']) {
+      } else if ($this->oType == TokenTypes::$aTypes['ellipsis']) {
         $oRest = $this->fnParseRestBinding();
         $this->fnParseBindingListItem($oRest);
         array_push($aElts, $oRest);
-        if ($this->oType === TokenTypes::$aTypes['comma']) 
+        if ($this->oType == TokenTypes::$aTypes['comma']) 
           $this->fnRaise($this->iStart, "Comma is not permitted after the rest element");
         $this->fnExpect($oClose);
         break;
@@ -2828,7 +2830,7 @@ class Parser
     $iStartPos = $this->iStart;
     $oStartLoc = $this->oStartLoc;
     $oExpr = $this->fnParseMaybeAssign($oNoIn, $oRefDestructuringErrors);
-    if ($this->oType === TokenTypes::$aTypes['comma']) {
+    if ($this->oType == TokenTypes::$aTypes['comma']) {
       $oNode = $this->fnStartNodeAt($iStartPos, $oStartLoc);
       $oNode->aExpressions = [$oExpr];
       while ($this->fnEat(TokenTypes::$aTypes['comma'])) 
@@ -2867,8 +2869,8 @@ class Parser
     $iStartPos = $this->iStart;
     $oStartLoc = $this->oStartLoc;
     
-    if ($this->oType === TokenTypes::$aTypes['parenL'] 
-        || $this->oType === TokenTypes::$aTypes['name'])
+    if ($this->oType == TokenTypes::$aTypes['parenL'] 
+        || $this->oType == TokenTypes::$aTypes['name'])
       $this->iPotentialArrowAt = $this->iStart;
     $oLeft = $this->fnParseMaybeConditional($oNoIn, $oRefDestructuringErrors);
     if (is_callable($fnAfterLeftParse)) {
@@ -2878,7 +2880,7 @@ class Parser
     if ($this->oType->bIsAssign) {
       $oNode = $this->fnStartNodeAt($iStartPos, $oStartLoc);
       $oNode->sOperator = $this->sValue;
-      $oNode->oLeft = $this->oType === TokenTypes::$aTypes['eq'] ? 
+      $oNode->oLeft = $this->oType == TokenTypes::$aTypes['eq'] ? 
         $this->fnToAssignable($oLeft, false, $oRefDestructuringErrors) : 
         $oLeft;
       //if (!$bOwnDestructuringErrors) 
@@ -2943,10 +2945,10 @@ class Parser
   public function fnParseExprOp($oLeft, $iLeftStartPos, $oLeftStartLoc, $iMinPrec, $oNoIn) 
   {
     $iPrec = $this->oType->iBinop;
-    if ($iPrec != null && (!$oNoIn || $this->oType !== TokenTypes::$aTypes['_in'])) {
+    if ($iPrec != null && (!$oNoIn || $this->oType != TokenTypes::$aTypes['_in'])) {
       if ($iPrec > $iMinPrec) {
-        $bLogical = $this->oType === TokenTypes::$aTypes['logicalOR'] 
-          || $this->oType === TokenTypes::$aTypes['logicalAND'];
+        $bLogical = $this->oType == TokenTypes::$aTypes['logicalOR'] 
+          || $this->oType == TokenTypes::$aTypes['logicalAND'];
         $sOp = $this->mValue;
         $this->fnNext();
         $iStartPos = $this->iStart;
@@ -2980,7 +2982,7 @@ class Parser
       $bSawUnary = true;
     } else if ($this->oType->bPrefix) {
       $oNode = $this->fnStartNode();
-      $bUpdate = $this->oType === TokenTypes::$aTypes['incDec'];
+      $bUpdate = $this->oType == TokenTypes::$aTypes['incDec'];
       $oNode->sOperator = $this->mValue;
       $oNode->bPrefix = true;
       $this->fnNext();
@@ -3112,7 +3114,7 @@ class Parser
         //     super . IdentifierName
         // SuperCall:
         //     super Arguments
-        if ($this->oType !== TokenTypes::$aTypes['dot'] && $this->oType !== TokenTypes::$aTypes['bracketL'] && $this->oType !== TokenTypes::$aTypes['parenL'])
+        if ($this->oType != TokenTypes::$aTypes['dot'] && $this->oType != TokenTypes::$aTypes['bracketL'] && $this->oType != TokenTypes::$aTypes['parenL'])
           $this->fnUnexpected();
         return $this->fnFinishNode($oNode, "Super");
 
@@ -3136,7 +3138,7 @@ class Parser
             return $this->fnParseArrowExpression($this->fnStartNodeAt($iStartPos, $oStartLoc), [$oId], false);
           if ($this->aOptions['ecmaVersion'] >= 8 
               && $oId->sName === "async" 
-              && $this->oType === TokenTypes::$aTypes['name'] 
+              && $this->oType == TokenTypes::$aTypes['name'] 
               && !$bContainsEsc) {
             $oId = $this->fnParseIdent();
             if ($this->fnCanInsertSemicolon() 
@@ -3161,7 +3163,7 @@ class Parser
       case TokenTypes::$aTypes['true']: 
       case TokenTypes::$aTypes['false']:
         $oNode = $this->fnStartNode();
-        $oNode->mValue = $this->oType == TokenTypes::$aTypes['null'] ? null : $this->oType === TokenTypes::$aTypes['true'];
+        $oNode->mValue = $this->oType == TokenTypes::$aTypes['null'] ? null : $this->oType == TokenTypes::$aTypes['true'];
         $oNode->sRaw = $this->oType->sKeyword;
         $this->fnNext();
         return $this->fnFinishNode($oNode, "Literal");
@@ -3598,7 +3600,7 @@ class Parser
     $this->fnExpect(TokenTypes::$aTypes['parenL']);
     $oNode->aParams = $this->fnParseBindingList(TokenTypes::$aTypes['parenR'], false, $this->aOptions['ecmaVersion'] >= 8);
     $this->fnCheckYieldAwaitInDefaultParams();
-    $this->fnParseFunctionBody(node, false);
+    $this->fnParseFunctionBody($oNode, false);
 
     $this->iYieldPos = $iOldYieldPos;
     $this->iAwaitPos = $iOldAwaitPos;
@@ -3753,13 +3755,13 @@ class Parser
   // identifiers.
 
   public function fnParseIdent(&$bLiberal, $bIsBinding) {
-    $oNode = $this->fnStartNode()
+    $oNode = $this->fnStartNode();
     if ($bLiberal && $this->aOptions['allowReserved'] === "never") 
       $bLiberal = false;
     if ($this->oType == TokenTypes::$aTypes['name']) {
-      $oNode->sName = $this->mValue
+      $oNode->sName = $this->mValue;
     } else if ($this->oType->sKeyword) {
-      $oNode->sName = $this->oType->sKeyword
+      $oNode->sName = $this->oType->sKeyword;
 
       // To fix https://github.com/acornjs/acorn/issues/575
       // `class` and `function` keywords push new context into $this->context.
@@ -3772,10 +3774,10 @@ class Parser
         array_pop($this->aContext);
       }
     } else {
-      $this->fnUnexpected()
+      $this->fnUnexpected();
     }
-    $this->fnNext()
-    $this->fnFinishNode(node, "Identifier")
+    $this->fnNext();
+    $this->fnFinishNode($oNode, "Identifier");
     if (!$bLiberal) 
       $this->fnCheckUnreserved($oNode);
     return $oNode;
@@ -3803,7 +3805,7 @@ class Parser
     return $this->fnFinishNode($oNode, "YieldExpression");
   }
 
-  public function fnParseAwait = function() 
+  public function fnParseAwait() 
   {
     if (!$this->iAwaitPos) 
       $this->iAwaitPos = $this->iStart;
@@ -3812,6 +3814,42 @@ class Parser
     $this->fnNext();
     $oNode->oArgument = $this->fnParseMaybeUnary(null, true);
     return $this->fnFinishNode($oNode, "AwaitExpression");
+  }
+  
+  public function fnRaise($iPos, $sMessage) 
+  {
+    $oLoc = $this->fnGetLineInfo($this->sInput, $iPos);
+    $sMessage .= " (" . $oLoc->iLine . ":" . $oLoc->iColumn . ")";
+    $oErr = new Exception($sMessage);
+    $oErr->iPos = $iPos; 
+    $oErr->oLoc = $oLoc; 
+    $oErr->iRaisedAt = $this->iPos;
+    throw $oErr;
+  }
+
+  public function fnRaiseRecoverable($iPos, $sMessage) 
+  {
+    $this->fnRaise($iPos, $sMessage);
+  }
+  
+  public function fnCurPosition() 
+  {
+    if ($this->aOptions['locations']) {
+      return new Position($this->iCurLine, $this->iPos - $this->iLineStart);
+    }
+  }
+  
+  public function fnGetLineInfo($sInput, $iOffset) 
+  {
+    for ($iLine = 1, $iCur = 0;;) {
+      $bResult = preg_match(Whitespace::lineBreak, $this->sInput, $aMatches, PREG_OFFSET_CAPTURE, $iCur);
+      if ($bResult && $aMatches[0][1] < $iOffset) {
+        ++$iLine;
+        $iCur = $aMatches[0][1] + mb_strlen($aMatches[0]);
+      } else {
+        return new Position($iLine, $iOffset - $iCur);
+      }
+    }
   }
   
   public function fnInFunction() 
@@ -3827,14 +3865,7 @@ class Parser
   {
     return ($this->fnCurrentVarScope()->iFlags & Scope::SCOPE_ASYNC) > 0;
   }
-  
-  public function fnCurPosition()
-  {
-    if ($this->aOptions['locations']) {
-      return new Position($this->iCurLine, $this->iPos - $this->iLineStart);
-    }
-  }
-  
+    
   public function fnParseI()
   {
     $oNode = $this->aOptions['program'] || $this->fnStartNode();

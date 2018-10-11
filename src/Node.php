@@ -69,7 +69,7 @@ class Node
   public $sRaw;
   public $oMeta;
   public $bTail;
-  public $oKey;
+  public $aParams;
   
   public function __construct($oParser, $iPos, $oLoc)
   {
