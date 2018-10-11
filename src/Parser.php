@@ -199,7 +199,7 @@ class Parser
           $sReserved = Identifier::$aReservedWords[$iV];
           break;
         }
-      if ($aOptions['sourceType'] === "module") 
+      if ($aOptions['sourceType'] == "module") 
         $sReserved .= " await";
     }
     $this->sReservedWords = fnKeywordRegexp($sReserved);
@@ -250,7 +250,7 @@ class Parser
     $this->bExprAllowed = true;
 
     // Figure out if it's a module code.
-    $this->bInModule = $aOptions['sourceType'] === "module";
+    $this->bInModule = $aOptions['sourceType'] == "module";
     $this->bStrict = $this->bInModule || $this->fnStrictDirective($this->iPos);
 
     // Used to signify the start of a potential arrow function
@@ -262,7 +262,7 @@ class Parser
     $this->aLabels = [];
 
     // If enabled, skip leading hashbang line.
-    if ($this->iPos === 0 && $aOptions['allowHashBang'] && mb_substr($this->sInput, 0, 2) === "#!")
+    if ($this->iPos == 0 && $aOptions['allowHashBang'] && mb_substr($this->sInput, 0, 2) == "#!")
       $this->fnSkipLineComment(2);
 
     // Scope tracking for duplicate variable names (see scope.js)
@@ -306,7 +306,7 @@ class Parser
     $iNext = $this->iPos + count($aMatches[0]);
     $iNextCh = Utilities::fnGetCharCodeAt($this->sInput, $iNext);
     //nextCh = $this->input.charCodeAt(next)
-    if ($iNextCh === 91 || $iNextCh === 123) 
+    if ($iNextCh == 91 || $iNextCh == 123) 
       return true; // '{' and '['
     if (Identifier::fnIsIdentifierStart($iNextCh, true)) {
       $iPos = $iNext + 1;
@@ -335,13 +335,13 @@ class Parser
       Whitespace::lineBreak, 
       mb_substr($this->sInput, $this->iPos, $iNext - $this->iPos)
     ) 
-    && mb_substr($this->sInput, $iNext, 8) === "function"
-    && ($iNext + 8 === count($this->sInput) 
+    && mb_substr($this->sInput, $iNext, 8) == "function"
+    && ($iNext + 8 == count($this->sInput) 
         || !Identifier::fnIsIdentifierChar(Utilities::fnGetCharAt($this->sInput, $iNext + 8)));
     /*
     return !lineBreak.test($this->input.slice($this->pos, next)) &&
-      $this->input.slice(next, next + 8) === "function" &&
-      (next + 8 === $this->input.length || !isIdentifierChar($this->input.charAt(next + 8)))
+      $this->input.slice(next, next + 8) == "function" &&
+      (next + 8 == $this->input.length || !isIdentifierChar($this->input.charAt(next + 8)))
      */
   }
 
@@ -352,7 +352,7 @@ class Parser
   // `if (foo) /blah/.exec(foo)`, where looking at the previous token
   // does not help.
 
-  public function fnParseStatement($sContext, $bTopLevel, $mExports)
+  public function fnParseStatement($sContext, $bTopLevel=false, $mExports=null)
   {
     $oStarttype = $this->oType;
     $oNode = $this->fnStartNode();
@@ -378,7 +378,7 @@ class Parser
       case TokenTypes::$aTypes['for']: 
         return $this->parseForStatement($oNode);
       case TokenTypes::$aTypes['function']:
-        if (($sContext && ($this->bStrict || $sContext !== "if")) 
+        if (($sContext && ($this->bStrict || $sContext != "if")) 
             && $this->aOptions['ecmaVersion'] >= 6) 
           $this->fnUnexpected();
         return $this->fnParseFunctionStatement($oNode, false, !$sContext);
@@ -399,7 +399,7 @@ class Parser
       case TokenTypes::$aTypes['const']: 
       case TokenTypes::$aTypes['var']:
         $sKind = !empty($sKind) ? $sKind : $this->mValue;
-        if ($sContext && $sKind !== "var") 
+        if ($sContext && $sKind != "var") 
           $this->fnUnexpected();
         return $this->fnParseVarStatement($oNode, $sKind);
       case TokenTypes::$aTypes['while']: 
@@ -418,7 +418,7 @@ class Parser
           if (!$this->bInModule)
             $this->fnRaise($this->iStart, "'import' and 'export' may appear only with 'sourceType: module'");
         }
-        return $oStarttype === TokenTypes::$aTypes['import'] ? 
+        return $oStarttype == TokenTypes::$aTypes['import'] ? 
           $this->fnParseImport($oNode) : 
           $this->fnParseExport($oNode, $mExports);
 
@@ -438,8 +438,8 @@ class Parser
         $sMaybeName = $this->mValue;
         $oExpr = $this->fnParseExpression();
         
-        if ($oStarttype === TokenTypes::$aTypes['name'] 
-            && $oExpr->sType === "Identifier" 
+        if ($oStarttype == TokenTypes::$aTypes['name'] 
+            && $oExpr->sType == "Identifier" 
             && $this->fnEat(TokenTypes::$aTypes['colon']))
           return $this->fnParseLabeledStatement($oNode, $sMaybeName, $oExpr, $sContext);
         else 
@@ -449,7 +449,7 @@ class Parser
 
   public function fnParseBreakContinueStatement(&$oNode, $sKeyword)
   {
-    $bIsBreak = $sKeyword === "break";
+    $bIsBreak = $sKeyword == "break";
     
     $this->fnNext();
     if ($this->fnEat(TokenTypes::$aTypes['semi']) 
@@ -467,14 +467,14 @@ class Parser
     $iI = 0;
     for (; $iI < count($this->aLabels); ++$iI) {
       $oLab = $this->aLabels[$iI];
-      if ($oNode->oLabel == null || $oLab->sName === $oNode->oLabel->sName) {
-        if ($oLab->sKind != null && ($bIsBreak || $oLab->sKind === "loop")) 
+      if ($oNode->oLabel == null || $oLab->sName == $oNode->oLabel->sName) {
+        if ($oLab->sKind != null && ($bIsBreak || $oLab->sKind == "loop")) 
           break;
         if ($oNode->oLabel && $bIsBreak) 
           break;
       }
     }
-    if ($iI === count($this->aLabels)) 
+    if ($iI == count($this->aLabels)) 
       $this->fnRaise($oNode->iStart, "Unsyntactic " . $sKeyword);
     return 
       $this->fnFinishNode($oNode, $bIsBreak ? "BreakStatement" : "ContinueStatement");
@@ -546,8 +546,8 @@ class Parser
       if (($this->oType == TokenTypes::$aTypes['in'] 
            || ($this->aOptions['ecmaVersion'] >= 6 
               && $this->fnIsContextual("of"))) 
-          && count($oInit->aDeclarations) === 1 
-          && !($sKind !== "var" && $oInit->aDeclarations[0]->init)) {
+          && count($oInit->aDeclarations) == 1 
+          && !($sKind != "var" && $oInit->aDeclarations[0]->init)) {
         if ($this->aOptions['ecmaVersion'] >= 9) {
           if ($this->oType == TokenTypes::$aTypes['in']) {
             if ($iAwaitAt > -1) 
@@ -699,7 +699,7 @@ class Parser
       $this->fnNext();
       if ($this->fnEat(TokenTypes::$aTypes['parenL'])) {
         $oClause->oParam = $this->fnParseBindingAtom();
-        $bSimple = $oClause->oParam->sType === "Identifier";
+        $bSimple = $oClause->oParam->sType == "Identifier";
         $this->fnEnterScope($bSimple ? Scope::SCOPE_SIMPLE_CATCH : 0);
         $this->fnCheckLVal($oClause->oParam, $bSimple ? Scope::BIND_SIMPLE_CATCH : Scope::BIND_LEXICAL);
         $this->fnExpect(TokenTypes::$aTypes['parenR']);
@@ -756,14 +756,14 @@ class Parser
   public function fnParseLabeledStatement(&$oNode, $sMaybeName, $oExpr, $sContext)
   {
     foreach ($this->aLabels as $oLabel)
-      if ($oLabel->name === $sMaybeName)
+      if ($oLabel->name == $sMaybeName)
         $this->fnRaise($oExpr->iStart, "Label '$sMaybeName' is already declared");
     
     $sKind = $this->oType->bIsLoop ? "loop" : $this->oType == TokenTypes::$aTypes['switch'] ? "switch" : null;
             
     for ($iI = count($this->aLabels) - 1; $iI >= 0; $iI--) {
       $oLabel = $this->aLabels[$iI];
-      if ($oLabel->iStatementStart === $oNode->iStart) {
+      if ($oLabel->iStatementStart == $oNode->iStart) {
         // Update information about previous labels on this node
         $oLabel->iStatementStart = $this->iStart;
         $oLabel->sKind = $sKind;
@@ -777,9 +777,9 @@ class Parser
     array_push($this->aLabels, $oTempLabel);
 
     $oNode->aBody = $this->fnParseStatement($sContext);
-    if ($oNode->aBody->sType === "ClassDeclaration" ||
-        $oNode->aBody->sType === "VariableDeclaration" && $oNode->aBody->sKind !== "var" ||
-        $oNode->aBody->sType === "FunctionDeclaration" && ($this->bStrict || $oNode->aBody->bGenerator || $oNode->aBody->bAsync))
+    if ($oNode->aBody->sType == "ClassDeclaration" ||
+        $oNode->aBody->sType == "VariableDeclaration" && $oNode->aBody->sKind != "var" ||
+        $oNode->aBody->sType == "FunctionDeclaration" && ($this->bStrict || $oNode->aBody->bGenerator || $oNode->aBody->bAsync))
       $this->fnRaiseRecoverable($oNode->aBody->iStart, "Invalid labeled declaration");
     array_pop($this->aLabels);
     $oNode->oLabel = $oExpr;
@@ -839,14 +839,14 @@ class Parser
   {
     $sType = $this->oType == TokenTypes::$aTypes['in'] ? "ForInStatement" : "ForOfStatement";
     $this->fnNext();
-    if ($sType === "ForInStatement") {
-      if ($oInit->sType === "AssignmentPattern" ||
-        ($oInit->sType === "VariableDeclaration" && $oInit->aDeclarations[0]->bInit != null &&
-         ($this->bStrict || $oInit->aDeclarations[0]->oId->sType !== "Identifier")))
+    if ($sType == "ForInStatement") {
+      if ($oInit->sType == "AssignmentPattern" ||
+        ($oInit->sType == "VariableDeclaration" && $oInit->aDeclarations[0]->bInit != null &&
+         ($this->bStrict || $oInit->aDeclarations[0]->oId->sType != "Identifier")))
         $this->fnRaise($oInit->iStart, "Invalid assignment in for-in loop head");
     }
     $oNode->oLeft = $oInit;
-    $oNode->oRight = $sType === "ForInStatement" ? $this->fnParseExpression() : $this->fnParseMaybeAssign();
+    $oNode->oRight = $sType == "ForInStatement" ? $this->fnParseExpression() : $this->fnParseMaybeAssign();
     $this->fnExpect(TokenTypes::$aTypes['parenR']);
     $this->fnExitScope();
     $oNode->aBody = $this->fnParseStatement("for");
@@ -865,12 +865,12 @@ class Parser
       $this->fnParseVarId($oDecl, $sKind);
       if ($this->fnEat(TokenTypes::$aTypes['eq'])) {
         $oDecl->oInit = $this->fnParseMaybeAssign($bIsFor);
-      } else if ($sKind === "const" 
+      } else if ($sKind == "const" 
                   && !($this->oType == TokenTypes::$aTypes['in'] 
                        || ($this->aOptions['ecmaVersion'] >= 6 
                            && $this->fnIsContextual("of")))) {
         $this->fnUnexpected();
-      } else if ($oDecl->oId->type !== "Identifier" 
+      } else if ($oDecl->oId->type != "Identifier" 
                  && !($bIsFor 
                       && ($this->oType == TokenTypes::$aTypes['in'] 
                           || $this->fnIsContextual("of")))) {
@@ -888,13 +888,13 @@ class Parser
   public function fnParseVarId(&$oDecl, $sKind)
   {
     $oDecl->oId = $this->fnParseBindingAtom($sKind);
-    $this->fnCheckLVal($oDecl->oId, $sKind === "var" ? Scope::BIND_VAR : Scope::BIND_LEXICAL, false);
+    $this->fnCheckLVal($oDecl->oId, $sKind == "var" ? Scope::BIND_VAR : Scope::BIND_LEXICAL, false);
   }
 
   // Parse a function declaration or literal (depending on the
   // `isStatement` parameter).
 
-  public function fnParseFunction(&$oNode, $iStatement, $bAllowExpressionBody, $bIsAsync)
+  public function fnParseFunction(&$oNode, $iStatement, $bAllowExpressionBody=false, $bIsAsync=false)
   {
     $this->fnInitFunction($oNode);
     if ($this->aOptions['ecmaVersion'] >= 9 
@@ -951,7 +951,7 @@ class Parser
       $oElement = $this->fnParseClassElement();
       if ($oElement) {
         array_push($oClassBody->aBody, $oElement);
-        if ($oElement->sType === "MethodDefinition" && $oElement->sKind === "constructor") {
+        if ($oElement->sType == "MethodDefinition" && $oElement->sKind == "constructor") {
           if ($bHadConstructor) 
             $this->fnRaise($oElement->iStart, "Duplicate constructor in the same class");
           $bHadConstructor = true;
@@ -1014,11 +1014,11 @@ class Parser
     $oKey = $oMethod.oKey;
     if (!$oMethod->bComputed 
         && !$oMethod->bStatic 
-        && ($oKey->sType === "Identifier" 
-            && $oKey->sName === "constructor" 
-            || $oKey->sType === "Literal" 
-            && $oKey->sValue === "constructor")) {
-      if ($oMethod->sKind !== "method") 
+        && ($oKey->sType == "Identifier" 
+            && $oKey->sName == "constructor" 
+            || $oKey->sType == "Literal" 
+            && $oKey->sValue == "constructor")) {
+      if ($oMethod->sKind != "method") 
         $this->fnRaise($oKey->iStart, "Constructor can't have get/set modifier");
       if ($bIsGenerator) 
         $this->fnRaise($oKey->iStart, "Constructor can't be a generator");
@@ -1026,16 +1026,16 @@ class Parser
         $this->fnRaise($oKey->iStart, "Constructor can't be an async method");
       $oMethod->sKind = "constructor";      
     } else if ($oMethod->bStatic 
-               && $oKey->sType === "Identifier" 
-               && $oKey->sName === "prototype") {
+               && $oKey->sType == "Identifier" 
+               && $oKey->sName == "prototype") {
       $this->fnRaise($oKey->iStart, "Classes may not have a static property named prototype");
     }
     $this->fnParseClassMethod($oMethod, $bIsGenerator, $bIsAsync);
-    if ($oMethod->sKind === "get" && count($oMethod->oValue->aParams) !== 0)
+    if ($oMethod->sKind == "get" && count($oMethod->oValue->aParams) != 0)
       $this->fnRaiseRecoverable($oMethod->oValue->iStart, "getter should have no params");
-    if ($oMethod->sKind === "set" && count($oMethod->oValue->aParams) !== 1)
+    if ($oMethod->sKind == "set" && count($oMethod->oValue->aParams) != 1)
       $this->fnRaiseRecoverable(method.value.start, "setter should have exactly one param");
-    if ($oMethod->sKind === "set" && $oMethod->oValue->aParams[0]->sType === "RestElement")
+    if ($oMethod->sKind == "set" && $oMethod->oValue->aParams[0]->sType == "RestElement")
       $this->fnRaiseRecoverable($oMethod->oValue->aParams[0].iStart, "Setter cannot use rest params");
     
     return $oMethod;
@@ -1051,7 +1051,7 @@ class Parser
   {
     $oNode->oId = $this->oType == TokenTypes::$aTypes['name'] ? 
       $this->fnParseIdent() : 
-      $bIsStatement === true ? 
+      $bIsStatement == true ? 
         $this->fnUnexpected() : 
         null;
   }
@@ -1099,7 +1099,7 @@ class Parser
     // export var|const|let|function|class ...
     if ($this->shouldParseExportStatement()) {
       $oNode->oDeclaration = $this->fnParseStatement(null);
-      if ($oNode->oDeclaration->sType === "VariableDeclaration")
+      if ($oNode->oDeclaration->sType == "VariableDeclaration")
         $this->fnCheckVariableExport($aExports, $oNode->oDeclaration->aDeclarations);
       else
         $this->fnCheckExport($aExports, $oNode->oDeclaration->oId->sName, $oNode->oDeclaration->oId->iStart);
@@ -1138,24 +1138,24 @@ class Parser
   public function fnCheckPatternExport(&$aExports, $oPat)
   {
     $sType = $oPat->sType;
-    if ($sType === "Identifier")
+    if ($sType == "Identifier")
       $this->fnCheckExport($aExports, $oPat->sName, $oPat->iStart);
-    else if ($sType === "ObjectPattern")
+    else if ($sType == "ObjectPattern")
       foreach ($oPat->aProperties as $oProp) {
         $this->fnCheckPatternExport($aExports, $oProp);
       }
-    else if ($sType === "ArrayPattern")
+    else if ($sType == "ArrayPattern")
       foreach ($oPat->aElements as $oElt) {
         if ($oElt) 
           $this->fnCheckPatternExport($aExports, $oElt);
       }
-    else if ($sType === "Property")
+    else if ($sType == "Property")
       $this->fnCheckPatternExport($aExports, $oPat->oValue);
-    else if ($sType === "AssignmentPattern")
+    else if ($sType == "AssignmentPattern")
       $this->fnCheckPatternExport($aExports, $oPat->oLeft);
-    else if ($sType === "RestElement")
+    else if ($sType == "RestElement")
       $this->fnCheckPatternExport($aExports, $oPat->oArgument);
-    else if ($sType === "ParenthesizedExpression")
+    else if ($sType == "ParenthesizedExpression")
       $this->fnCheckPatternExport($aExports, $oPat->oExpression);
   }
 
@@ -1169,10 +1169,10 @@ class Parser
 
   public function fnShouldParseExportStatement()
   {
-    return $this->oType->sKeyword === "var" ||
-      $this->oType->sKeyword === "const" ||
-      $this->oType->sKeyword === "class" ||
-      $this->oType->sKeyword === "function" ||
+    return $this->oType->sKeyword == "var" ||
+      $this->oType->sKeyword == "const" ||
+      $this->oType->sKeyword == "class" ||
+      $this->oType->sKeyword == "function" ||
       $this->fnIsLet() ||
       $this->fnIsAsyncFunction();
   }
@@ -1277,12 +1277,12 @@ class Parser
   public function fnIsDirectiveCandidate($oStatement)
   {
     return (
-      $oStatement->sType === "ExpressionStatement" &&
-      $oStatement->oExpression->sType === "Literal" &&
+      $oStatement->sType == "ExpressionStatement" &&
+      $oStatement->oExpression->sType == "Literal" &&
       is_string($oStatement->oExpression->mValue) &&
       // Reject parenthesized strings.
-      (Utilities::fnGetCharAt($this->sInput, $oStatement->iStart) === "\"" 
-       || Utilities::fnGetCharAt($this->sInput, $oStatement->iStart) === "'")
+      (Utilities::fnGetCharAt($this->sInput, $oStatement->iStart) == "\"" 
+       || Utilities::fnGetCharAt($this->sInput, $oStatement->iStart) == "'")
     );
   }  
   
@@ -1294,31 +1294,31 @@ class Parser
   public function fnBraceIsBlock($oPrevType) 
   {
     $oParent = $this->fnCurContext();
-    if ($oParent === TokenContextTypes::$aTypes['f_expr'] 
-        || $oParent === TokenContextTypes::$aTypes['f_stat'])
+    if ($oParent == TokenContextTypes::$aTypes['f_expr'] 
+        || $oParent == TokenContextTypes::$aTypes['f_stat'])
       return true;
-    if ($oPrevType === TokenTypes::$aTypes['colon']
-        && ($oParent === TokenContextTypes::$aTypes['b_stat'] 
-            || $oParent === TokenContextTypes::$aTypes['b_expr']))
+    if ($oPrevType == TokenTypes::$aTypes['colon']
+        && ($oParent == TokenContextTypes::$aTypes['b_stat'] 
+            || $oParent == TokenContextTypes::$aTypes['b_expr']))
       return !$oParent->bIsExpr;
 
     // The check for `TokenTypes::$aTypes['name'] && exprAllowed` detects whether we are
     // after a `yield` or `of` construct. See the `updateContext` for
     // `TokenTypes::$aTypes['name']`.
-    if ($oPrevType === TokenTypes::$aTypes['return'] 
-        || $oPrevType === TokenTypes::$aTypes['name']
+    if ($oPrevType == TokenTypes::$aTypes['return'] 
+        || $oPrevType == TokenTypes::$aTypes['name']
         && $this->bExprAllowed)
       return preg_match(Whitespace::lineBreak, mb_substr($this->sInput, $this->iLastTokEnd, $this->iStart));
-    if ($oPrevType === TokenTypes::$aTypes['else']
-        || $oPrevType === TokenTypes::$aTypes['semi'] 
-        || $oPrevType === TokenTypes::$aTypes['eof'] 
-        || $oPrevType === TokenTypes::$aTypes['parenR'] 
-        || $oPrevType === TokenTypes::$aTypes['arrow'])
+    if ($oPrevType == TokenTypes::$aTypes['else']
+        || $oPrevType == TokenTypes::$aTypes['semi'] 
+        || $oPrevType == TokenTypes::$aTypes['eof'] 
+        || $oPrevType == TokenTypes::$aTypes['parenR'] 
+        || $oPrevType == TokenTypes::$aTypes['arrow'])
       return true;
-    if ($oPrevType === TokenTypes::$aTypes['braceL'])
-      return $oParent === TokenContextTypes::$aTypes['b_stat'];
-    if ($oPrevType === TokenTypes::$aTypes['var']
-        || $oPrevType === TokenTypes::$aTypes['name'])
+    if ($oPrevType == TokenTypes::$aTypes['braceL'])
+      return $oParent == TokenContextTypes::$aTypes['b_stat'];
+    if ($oPrevType == TokenTypes::$aTypes['var']
+        || $oPrevType == TokenTypes::$aTypes['name'])
       return false;
     return !$this->bExprAllowed;
   }
@@ -1326,7 +1326,7 @@ class Parser
   public function fnInGeneratorContext() {
     for ($iI = count($this->aContext) - 1; $iI >= 1; $iI--) {
       $oContext = $this->aContext[$iI];
-      if ($oContext->sToken === "function")
+      if ($oContext->sToken == "function")
         return $oContext->bGenerator;
     }
     return false;
@@ -1335,7 +1335,7 @@ class Parser
   public function fnUpdateContext($oPrevType) {
     $fnUpdate;
     $oType = $this->oType;
-    if ($oType->sKeyword && $oPrevType === TokenTypes::$aTypes['dot'])
+    if ($oType->sKeyword && $oPrevType == TokenTypes::$aTypes['dot'])
       $this->bExprAllowed = false;
     else if ($fnUpdate = $oType->fnUpdateContext) {
       $fnUpdate = Closure::bind($fnUpdate, $this);
@@ -1358,14 +1358,14 @@ class Parser
   {
     $bRedeclared = false;
     
-    if ($iBindingType === BIND_LEXICAL) {
+    if ($iBindingType == Scope::BIND_LEXICAL) {
       $oScope = $this->fnCurrentScope();
       $bRedeclared = in_array($sName, $oScope->aLexical) || in_array($sName, $oScope->aVar);
       array_push($oScope->aLexical, $sName);
-    } else if ($iBindingType === BIND_SIMPLE_CATCH) {
+    } else if ($iBindingType == Scope::BIND_SIMPLE_CATCH) {
       $oScope = $this->fnCurrentScope();
       array_push($oScope->aLexical, $sName);
-    } else if ($iBindingType === BIND_FUNCTION) {
+    } else if ($iBindingType == Scope::BIND_FUNCTION) {
       $oScope = $this->fnCurrentScope();
       $bRedeclared = in_array($sName, $oScope->aLexical);
       array_push($oScope->aVar, $sName);
@@ -1374,7 +1374,7 @@ class Parser
         $oScope = $this->aScopeStack[$iI];
         if (in_array($sName, $oScope->aLexical) 
               && !($oScope->iFlags & Scope::SCOPE_SIMPLE_CATCH) 
-              && $oScope->aLexical[0] === $sName) 
+              && $oScope->aLexical[0] == $sName) 
           $bRedeclared = true;
         array_push($oScope->aVar, $sName);
         if ($oScope->iFlags & Scope::SCOPE_VAR) 
@@ -1494,7 +1494,7 @@ class Parser
   public function fnIsContextual($sName) 
   {
     return $this->oType == TokenTypes::$aTypes['name']
-      && $this->mValue === $sName 
+      && $this->mValue == $sName 
       && !$this->bContainsEsc;
   }
 
@@ -1544,7 +1544,7 @@ class Parser
       $this->fnUnexpected();
   }
 
-  public function fnAfterTrailingComma($oTokType, $bNotNext) 
+  public function fnAfterTrailingComma($oTokType, $bNotNext=false) 
   {
     if ($this->oType == $oTokType) {
       if (is_callable($this->aOptions['onTrailingComma']))
@@ -1582,7 +1582,7 @@ class Parser
       $this->fnRaiseRecoverable($iParens, "Parenthesized pattern");
   }
 
-  public function fnCheckExpressionErrors($oRefDestructuringErrors, $bAndThrow) 
+  public function fnCheckExpressionErrors($oRefDestructuringErrors, $bAndThrow=false) 
   {
     if (!$oRefDestructuringErrors) 
       return false;
@@ -1608,10 +1608,10 @@ class Parser
 
   public function fnIsSimpleAssignTarget($oExpr) 
   {
-    if ($oExpr->sType === "ParenthesizedExpression")
+    if ($oExpr->sType == "ParenthesizedExpression")
       return $this->fnIsSimpleAssignTarget($oExpr->oExpression);
-    return $oExpr->sType === "Identifier" 
-      || $oExpr->sType === "MemberExpression";
+    return $oExpr->sType == "Identifier" 
+      || $oExpr->sType == "MemberExpression";
   }
   
   public function fnNext() 
@@ -1634,13 +1634,13 @@ class Parser
 
   /*
   // If we're in an ES6 environment, make parsers iterable
-  if (typeof Symbol !== "undefined")
+  if (typeof Symbol != "undefined")
     pp[Symbol.iterator] = function() {
       return {
         next: () => {
           let token = $this->getToken()
           return {
-            done: token.type === TokenTypes::$aTypes['eof'],
+            done: token.type == TokenTypes::$aTypes['eof'],
             value: token
           }
         }
@@ -1682,7 +1682,7 @@ class Parser
     // Identifier or keyword. '\uXXXX' sequences are allowed in
     // identifiers, so '\' also dispatches to that.
     if (Identifier::fnIsIdentifierStart($iCode, $this->aOptions['ecmaVersion'] >= 6) 
-        || $iCode === 92 /* '\' */)
+        || $iCode == 92 /* '\' */)
       return $this->fnReadWord();
 
     return $this->fnGetTokenFromCode($iCode);
@@ -1706,7 +1706,7 @@ class Parser
     
     $iStart = $this->iPos;
     $iEnd = mb_strpos($this->sInput, "*/", $this->iPos += 2);
-    if ($iEnd === false) 
+    if ($iEnd == false) 
       $this->fnRaise($this->iPos - 2, "Unterminated comment");
     $this->iPos = $iEnd + 2;
     
@@ -1766,7 +1766,7 @@ class Parser
           ++$this->iPos;
           break;
         case 13:
-          if (Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 1) === 10) {
+          if (Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 1) == 10) {
             ++$this->iPos;
           }
         case 10: case 8232: case 8233:
@@ -1805,7 +1805,7 @@ class Parser
   // the token, so that the next one's `start` will point at the
   // right position.
 
-  public function fnFinishToken($oType, $mVal) 
+  public function fnFinishToken($oType, $mVal=null) 
   {
     $this->iEnd = $this->iPos;
     if ($this->aOptions['locations']) 
@@ -1833,7 +1833,7 @@ class Parser
       return $this->fnReadNumber(true);
     
     $iNext2 = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 2);
-    if ($this->aOptions['ecmaVersion'] >= 6 && $iNext === 46 && $iNext2 === 46) { // 46 = dot '.'
+    if ($this->aOptions['ecmaVersion'] >= 6 && $iNext == 46 && $iNext2 == 46) { // 46 = dot '.'
       $this->iPos += 3;
       return $this->fnFinishToken(TokenTypes::$aTypes['ellipsis']);
     } else {
@@ -1849,7 +1849,7 @@ class Parser
       ++$this->iPos; 
       return $this->fnReadRegexp();
     }
-    if ($iNext === 61) 
+    if ($iNext == 61) 
       return $this->fnFinishOp(TokenTypes::$aTypes['assign'], 2);
     return $this->fnFinishOp(TokenTypes::$aTypes['slash'], 1);
   }
@@ -1858,18 +1858,18 @@ class Parser
   { // '%*'
     $iNext = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 1);
     $iSize = 1;
-    $oTokentype = $iCode === 42 ? 
+    $oTokentype = $iCode == 42 ? 
       TokenTypes::$aTypes['star'] : 
       TokenTypes::$aTypes['modulo'];
 
     // exponentiation operator ** and **=
-    if ($this->aOptions['ecmaVersion'] >= 7 && $iCode === 42 && $iNext === 42) {
+    if ($this->aOptions['ecmaVersion'] >= 7 && $iCode == 42 && $iNext == 42) {
       ++$iSize;
       $oTokentype = TokenTypes::$aTypes['starstar'];
       $iNext = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 2);
     }
 
-    if ($iNext === 61) 
+    if ($iNext == 61) 
       return $this->fnFinishOp(TokenTypes::$aTypes['assign'], $iSize + 1);
             
     return $this->fnFinishOp($oTokentype, $iSize);
@@ -1878,17 +1878,17 @@ class Parser
   public function fnReadToken_pipe_amp($iCode) 
   { // '|&'
     $iNext = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 1);
-    if ($iNext === $iCode) 
+    if ($iNext == $iCode) 
       return $this->fnFinishOp(
-        $iCode === 124 ? 
+        $iCode == 124 ? 
           TokenTypes::$aTypes['logicalOR'] : 
           TokenTypes::$aTypes['logicalAND'], 
         2
       );
-    if ($iNext === 61) 
+    if ($iNext == 61) 
       return $this->fnFinishOp(TokenTypes::$aTypes['assign'], 2);
     return $this->fnFinishOp(
-      $iCode === 124 ? 
+      $iCode == 124 ? 
         TokenTypes::$aTypes['bitwiseOR'] : 
         TokenTypes::$aTypes['bitwiseAND'],
       1
@@ -1898,7 +1898,7 @@ class Parser
   public function fnReadToken_caret() 
   { // '^'
     $iNext = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 1);
-    if ($iNext === 61) 
+    if ($iNext == 61) 
       return $this->fnFinishOp(TokenTypes::$aTypes['assign'], 2);
     return $this->fnFinishOp(TokenTypes::$aTypes['bitwiseXOR'], 1);
   }
@@ -1906,12 +1906,12 @@ class Parser
   public function fnReadToken_plus_min($iCode) 
   { // '+-'
     $iNext = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 1);
-    if ($iNext === $iCode) {
-      if ($iNext === 45 
+    if ($iNext == $iCode) {
+      if ($iNext == 45 
           && !$this->bInModule 
-          && Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 2) === 62 
+          && Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 2) == 62 
           && (
-            $this->iLastTokEnd === 0 
+            $this->iLastTokEnd == 0 
             || preg_match(
                 Whitespace::lineBreak, 
                 mb_substr(
@@ -1928,7 +1928,7 @@ class Parser
       }
       return $this->fnFinishOp(TokenTypes::$aTypes['incDec'], 2);
     }
-    if ($iNext === 61) 
+    if ($iNext == 61) 
       return $this->fnFinishOp(TokenTypes::$aTypes['assign'], 2);
     return $this->fnFinishOp(TokenTypes::$aTypes['plusMin'], 1);
   }
@@ -1937,26 +1937,26 @@ class Parser
   { // '<>'
     $iNext = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 1);
     $iSize = 1;
-    if ($iNext === $iCode) {
-      $iSize = $iCode === 62 
-        && Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 2) === 62 ? 
+    if ($iNext == $iCode) {
+      $iSize = $iCode == 62 
+        && Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 2) == 62 ? 
           3 : 
           2;
-      if (Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + $iSize) === 61) 
+      if (Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + $iSize) == 61) 
         return $this->fnFinishOp(TokenTypes::$aTypes['assign'], $iSize + 1);
       return $this->fnFinishOp(TokenTypes::$aTypes['bitShift'], $iSize);
     }
-    if ($iNext === 33 
-        && $iCode === 60 
+    if ($iNext == 33 
+        && $iCode == 60 
         && !$this->bInModule 
-        && Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 2) === 45 
-        && Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 3) === 45) {
+        && Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 2) == 45 
+        && Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 3) == 45) {
       // `<!--`, an XML-style comment that should be interpreted as a line comment
       $this->fnSkipLineComment(4);
       $this->fnSkipSpace();
       return $this->fnNextToken();
     }
-    if ($iNext === 61) 
+    if ($iNext == 61) 
       $iSize = 2;
     return $this->fnFinishOp(TokenTypes::$aTypes['relational'], $iSize);
   }
@@ -1964,18 +1964,18 @@ class Parser
   public function fnReadToken_eq_excl($iCode) 
   { // '=!'
     $iNext = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 1);
-    if ($iNext === 61) 
+    if ($iNext == 61) 
       return $this->fnFinishOp(
         TokenTypes::$aTypes['equality'], 
-        Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 2) === 61 ? 
+        Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 2) == 61 ? 
           3 : 
           2
       );
-    if ($iCode === 61 && next === 62 && $this->aOptions['ecmaVersion'] >= 6) { // '=>'
+    if ($iCode == 61 && $iNext == 62 && $this->aOptions['ecmaVersion'] >= 6) { // '=>'
       $this->iPos += 2;
       return $this->fnFinishToken(TokenTypes::$aTypes['arrow']);
     }
-    return $this->fnFinishOp($iCode === 61 ? TokenTypes::$aTypes['eq'] : TokenTypes::$aTypes['prefix'], 1);
+    return $this->fnFinishOp($iCode == 61 ? TokenTypes::$aTypes['eq'] : TokenTypes::$aTypes['prefix'], 1);
   }
 
   public function fnGetTokenFromCode($iCode) 
@@ -2006,12 +2006,12 @@ class Parser
 
       case 48: // '0'
         $iNext = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos + 1);
-        if ($iNext === 120 || $iNext === 88) 
+        if ($iNext == 120 || $iNext == 88) 
           return $this->fnReadRadixNumber(16); // '0x', '0X' - hex number
-        if ($this->aOptions.ecmaVersion >= 6) {
-          if (next === 111 || next === 79) 
+        if ($this->aOptions['ecmaVersion'] >= 6) {
+          if ($iNext == 111 || $iNext == 79) 
             return $this->fnReadRadixNumber(8); // '0o', '0O' - octal number
-          if (next === 98 || next === 66) 
+          if ($iNext == 98 || $iNext == 66) 
             return $this->fnReadRadixNumber(2); // '0b', '0B' - binary number
         }
 
@@ -2088,13 +2088,13 @@ class Parser
         $this->fnRaise($iStart, "Unterminated regular expression");
               
       if (!$bEscaped) {
-        if ($sCh === "[") 
+        if ($sCh == "[") 
           $bInClass = true;
-        else if ($sCh === "]" && $bInClass) 
+        else if ($sCh == "]" && $bInClass) 
           $bInClass = false;
-        else if ($sCh === "/" && !$bInClass) 
+        else if ($sCh == "/" && !$bInClass) 
           break;
-        $bEscaped = $sCh === "\\";
+        $bEscaped = $sCh == "\\";
       } else 
         $bEscaped = false;
       ++$this->iPos;
@@ -2133,12 +2133,13 @@ class Parser
   // were read, the integer value otherwise. When `len` is given, this
   // will return `null` unless the integer has exactly `len` digits.
 
-  public function fnReadInt($iRadix, $iLen) 
+  public function fnReadInt($iRadix, $iLen=null) 
   {
     $iStart = $this->iPos;
     $iTotal = 0;
     for ($iI = 0, $iE = $iLen == null ? INF : $iLen; $iI < $iE; ++$iI) {
-      $iCode = Utilities::fnGetCharAt($this->sInput, $this->iPos);
+      $iCode = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos);
+      
       $iVal;
       if ($iCode >= 97) 
         $iVal = $iCode - 97 + 10; // a
@@ -2153,9 +2154,10 @@ class Parser
       ++$this->iPos;
       $iTotal = $iTotal * $iRadix + $iVal;
     }
-    if ($this->iPos === $iStart || $iLen != null && $this->iPos - $iStart !== $iLen) 
+    
+    if ($this->iPos == $iStart || $iLen != null && $this->iPos - $iStart != $iLen) 
       return null;
-
+    
     return $iTotal;
   }
 
@@ -2180,7 +2182,7 @@ class Parser
     if (!$bStartsWithDot && $this->fnReadInt(10) === null) 
       $this->fnRaise($iStart, "Invalid number");
     $bOctal = ($this->iPos - $iStart) >= 2
-      && Utilities::fnGetCharAt($this->sInput, $iStart) === 48;
+      && Utilities::fnGetCharAt($this->sInput, $iStart) == 48;
     if ($bOctal && $this->bStrict) 
       $this->fnRaise($iStart, "Invalid number");
     if ($bOctal 
@@ -2195,14 +2197,14 @@ class Parser
        ) 
       $bOctal = false;
     $iNext = Utilities::fnGetCharAt($this->sInput, $this->iPos);
-    if ($iNext === 46 && !$bOctal) { // '.'
+    if ($iNext == 46 && !$bOctal) { // '.'
       ++$this->iPos;
       $this->fnReadInt(10);
       $iNext = Utilities::fnGetCharAt($this->sInput, $this->iPos);
     }
-    if (($iNext === 69 || $iNext === 101) && !$bOctal) { // 'eE'
+    if (($iNext == 69 || $iNext == 101) && !$bOctal) { // 'eE'
       $iNext = Utilities::fnGetCharAt($this->sInput, ++$this->iPos);
-      if ($iNext === 43 || $iNext === 45) 
+      if ($iNext == 43 || $iNext == 45) 
         ++$this->iPos; // '+-'
       if ($this->fnReadInt(10) === null) 
         $this->fnRaise($iStart, "Invalid number");
@@ -2222,7 +2224,7 @@ class Parser
     $iCh = Utilities::fnGetCharAt($this->sInput, $this->iPos);
     $iCode;
 
-    if ($iCh === 123) { // '{'
+    if ($iCh == 123) { // '{'
       if ($this->aOptions['ecmaVersion'] < 6) 
         $this->fnUnexpected();
       $iCodePos = ++$this->iPos;
@@ -2244,10 +2246,10 @@ class Parser
     for (;;) {
       if ($this->iPos >= mb_strlen($this->sInput))
         $this->fnRaise($this->iStart, "Unterminated string constant");
-      $iCh = Utilities::fnGetCharAt($this->sInput, $this->iPos);
-      if ($iCh === $iQuote) 
+      $iCh = Utilities::fnGetCharCodeAt($this->sInput, $this->iPos);
+      if ($iCh == $iQuote) 
         break;
-      if ($iCh === 92) { // '\'
+      if ($iCh == 92) { // '\'
         $sOut .= mb_substr($this->sInput, $iChunkStart, $this->iPos - $iChunkStart);
         $sOut .= $this->fnReadEscapedChar(false);
         $iChunkStart = $this->iPos;
@@ -2298,12 +2300,12 @@ class Parser
       
       $iCh = Utilities::fnGetCharAt($this->sInput, $this->iPos);
       
-      if ($iCh === 96 || $iCh === 36 && Utilities::fnGetCharAt($this->sInput, $this->iPos + 1) === 123) { // '`', '${'
-        if ($this->iPos === $this->iStart 
+      if ($iCh == 96 || $iCh == 36 && Utilities::fnGetCharAt($this->sInput, $this->iPos + 1) == 123) { // '`', '${'
+        if ($this->iPos == $this->iStart 
             && ($this->oType == TokenTypes::$aTypes['template'] 
                 || $this->oType == TokenTypes::$aTypes['invalidTemplate'])
            ) {
-          if ($iCh === 36) {
+          if ($iCh == 36) {
             $this->iPos += 2;
             return $this->fnFinishToken(TokenTypes::$aTypes['dollarBraceL']);
           } else {
@@ -2314,7 +2316,7 @@ class Parser
         $sOut .= mb_substr($this->sInput, $iChunkStart, $this->iPos - $iChunkStart);
         return $this->fnFinishToken(TokenTypes::$aTypes['template'], $sOut);
       }
-      if ($iCh === 92) { // '\'
+      if ($iCh == 92) { // '\'
         $sOut .= mb_substr($this->sInput, $iChunkStart, $this->iPos - $iChunkStart);
         $sOut .= $this->fnReadEscapedChar(true);
         $iChunkStart = $this->iPos;
@@ -2323,7 +2325,7 @@ class Parser
         ++$this->iPos;
         switch ($iCh) {
           case 13:
-            if (Utilities::fnGetCharAt($this->sInput, $this->iPos) === 10) 
+            if (Utilities::fnGetCharAt($this->sInput, $this->iPos) == 10) 
               ++$this->iPos;
           case 10:
             $sOut .= "\n";
@@ -2353,7 +2355,7 @@ class Parser
           break;
 
         case "$":
-          if (Utilities::fnGetCharAt($this->sInput, $this->iPos + 1) !== "{") {
+          if (Utilities::fnGetCharAt($this->sInput, $this->iPos + 1) != "{") {
             break;
           }
         // falls through
@@ -2388,7 +2390,7 @@ class Parser
       case 118: return "\x{000b}"; // 'v' -> '\u000b'
       case 102: return "\f"; // 'f' -> '\f'
       case 13: 
-        if (Utilities::fnGetCharAt($this->sInput, $this->iPos) === 10) 
+        if (Utilities::fnGetCharAt($this->sInput, $this->iPos) == 10) 
           ++$this->iPos; // '\r\n'
       case 10: // ' \n'
         if ($this->aOptions['locations']) { 
@@ -2407,7 +2409,7 @@ class Parser
           }
           $this->iPos += mb_strlen($sOctalStr) - 1;
           $iCh = Utilities::fnGetCharAt($this->sInput, $this->iPos);
-          if (($sOctalStr !== "0" || $iCh === 56 || $iCh === 57) && ($this->bStrict || $bInTemplate)) {
+          if (($sOctalStr != "0" || $iCh == 56 || $iCh == 57) && ($this->bStrict || $bInTemplate)) {
             $this->fnInvalidStringToken(
               $this->iPos - 1 - mb_strlen($sOctalStr),
               $bInTemplate
@@ -2450,12 +2452,12 @@ class Parser
       $iCh = $this->fnFullCharCodeAtPos();
       if (Identifier::fnIsIdentifierChar($iCh, $bAstral)) {
         $this->iPos += $iCh <= 0xffff ? 1 : 2;
-      } else if ($iCh === 92) { // "\"
+      } else if ($iCh == 92) { // "\"
         $this->bContainsEsc = true;
         $sWord .= mb_substr($this->sInput, $iChunkStart, $this->iPos - $iChunkStart);
         $iEscStart = $this->iPos;
         
-        if (Utilities::fnGetCharAt($this->sInput, ++$this->iPos) !== 117) // "u"
+        if (Utilities::fnGetCharAt($this->sInput, ++$this->iPos) != 117) // "u"
           $this->fnInvalidStringToken($this->iPos, "Expecting Unicode escape sequence \\uXXXX");
         
         ++$this->iPos;
@@ -2500,7 +2502,7 @@ class Parser
     if ($this->aOptions['ecmaVersion'] >= 6 && $oNode) {
       switch ($oNode->sType) {
       case "Identifier":
-        if ($this->fnInAsync() && $oNode->sName === "await")
+        if ($this->fnInAsync() && $oNode->sName == "await")
           $this->fnRaise($oNode->iStart, "Can not use 'await' as identifier inside an async function");
         break;
 
@@ -2521,9 +2523,9 @@ class Parser
           //
           //   It is a Syntax Error if |DestructuringAssignmentTarget| is an |ArrayLiteral| or an |ObjectLiteral|.
           if (
-            $oProp->sType === "RestElement" 
-              && ($oProp->oArgument->sType === "ArrayPattern" 
-                  || $oProp->oArgument->sType === "ObjectPattern")
+            $oProp->sType == "RestElement" 
+              && ($oProp->oArgument->sType == "ArrayPattern" 
+                  || $oProp->oArgument->sType == "ObjectPattern")
           ) {
             $this->fnRaise($oProp->oArgument->iStart, "Unexpected token");
           }
@@ -2531,8 +2533,8 @@ class Parser
         break;
 
       case "Property":
-        // AssignmentProperty has type === "Property"
-        if ($oNode->sKind !== "init") 
+        // AssignmentProperty has type == "Property"
+        if ($oNode->sKind != "init") 
           $this->fnRaise($oNode->oKey->iStart, "Object pattern can't contain getter or setter");
         $this->fnToAssignable($oNode->oValue, $bIsBinding);
         break;
@@ -2547,12 +2549,12 @@ class Parser
       case "SpreadElement":
         $oNode->sType = "RestElement";
         $this->fnToAssignable($oNode->oArgument, $bIsBinding);
-        if ($oNode->oArgument->sType === "AssignmentPattern")
+        if ($oNode->oArgument->sType == "AssignmentPattern")
           $this->fnRaise($oNode->oArgument->iStart, "Rest elements cannot have a default value");
         break;
 
       case "AssignmentExpression":
-        if ($oNode->sOperator !== "=") 
+        if ($oNode->sOperator != "=") 
           $this->fnRaise($oNode->oLeft->iEnd, "Only '=' operator can be used for specifying default value.");
         $oNode->sType = "AssignmentPattern";
         //delete node.operator;
@@ -2590,11 +2592,11 @@ class Parser
     }
     if ($iEnd) {
       $oLast = $aExprList[$iEnd - 1];
-      if ($this->aOptions['ecmaVersion'] === 6 
+      if ($this->aOptions['ecmaVersion'] == 6 
           && $bIsBinding 
           && $oLast 
-          && $oLast->sType === "RestElement" 
-          && $oLast->oArgument->sType !== "Identifier")
+          && $oLast->sType == "RestElement" 
+          && $oLast->oArgument->sType != "Identifier")
         $this->fnUnexpected($oLast->oArgument->iStart);
     }
     return $aExprList;
@@ -2616,7 +2618,7 @@ class Parser
     $this->fnNext();
 
     // RestElement inside of a function parameter must be an identifier
-    if ($this->aOptions['ecmaVersion'] === 6 
+    if ($this->aOptions['ecmaVersion'] == 6 
         && $this->oType != TokenTypes::$aTypes['name']) 
       $this->fnUnexpected();
 
@@ -2674,14 +2676,14 @@ class Parser
     return $aElts;
   }
 
-  public function parseBindingListItem($oParam) 
+  public function fnParseBindingListItem($oParam) 
   {
     return $oParam;
   }
 
   // Parses assignment pattern around given atom if possible.
 
-  public function fnParseMaybeDefault($iStartPos, $oStartLoc, $oLeft) 
+  public function fnParseMaybeDefault($iStartPos, $oStartLoc, $oLeft=null) 
   {
     if (!$oLeft) {
       $oLeft = $this->fnParseBindingAtom();
@@ -2702,7 +2704,7 @@ class Parser
   // 'let' indicating that the lval creates a lexical ('let' or 'const') binding
   // 'none' indicating that the binding should be checked for illegal identifiers, but not for duplicate references
 
-  public function fnCheckLVal($oExpr, $iBindingType = Scope::BIND_NONE, $aCheckClashes) 
+  public function fnCheckLVal($oExpr, $iBindingType = Scope::BIND_NONE, $aCheckClashes=[]) 
   {
     switch ($oExpr->sType) {
       case "Identifier":
@@ -2713,7 +2715,7 @@ class Parser
             $this->fnRaiseRecoverable($oExpr->iStart, "Argument name clash");
           $aCheckClashes[$oExpr->sName] = true;
         }
-        if ($iBindingType !== Scope::BIND_NONE && $iBindingType !== Scope::BIND_OUTSIDE) 
+        if ($iBindingType != Scope::BIND_NONE && $iBindingType != Scope::BIND_OUTSIDE) 
           $this->fnDeclareName($oExpr->sName, $iBindingType, $oExpr->iStart);
         break;
 
@@ -2728,7 +2730,7 @@ class Parser
         break;
 
       case "Property":
-        // AssignmentProperty has type === "Property"
+        // AssignmentProperty has type == "Property"
         $this->fnCheckLVal($oExpr->oValue, $iBindingType, $aCheckClashes);
         break;
 
@@ -2758,7 +2760,7 @@ class Parser
   
   public function fnCheckPropClash($oProp, &$aPropHash, &$oRefDestructuringErrors) 
   {
-    if ($this->aOptions['ecmaVersion'] >= 9 && $oProp->sType === "SpreadElement")
+    if ($this->aOptions['ecmaVersion'] >= 9 && $oProp->sType == "SpreadElement")
       return;
     if ($this->aOptions['ecmaVersion'] >= 6 && ($oProp->bComputed || $oProp->bMethod || $oProp->bShorthand))
       return;
@@ -2776,7 +2778,7 @@ class Parser
     }
     $sKind = $oProp->sKind;
     if ($this->aOptions['ecmaVersion'] >= 6) {
-      if ($sName === "__proto__" && $sKind === "init") {
+      if ($sName == "__proto__" && $sKind == "init") {
         if ($aPropHash['proto']) {
           if ($oRefDestructuringErrors && $oRefDestructuringErrors->iDoubleProto < 0) 
             $oRefDestructuringErrors->iDoubleProto = $oKey->iStart;
@@ -2792,7 +2794,7 @@ class Parser
     $oOther = &$aPropHash[$sName];
     if ($oOther) {
       $bRedefinition;
-      if ($sKind === "init") {
+      if ($sKind == "init") {
         $bRedefinition = $this->bStrict && $oOther['init'] || $oOther['get'] || $oOther['set'];
       } else {
         $bRedefinition = $oOther['init'] || $oOther[$sKind];
@@ -2825,7 +2827,7 @@ class Parser
   // and object pattern might appear (so it's possible to raise
   // delayed syntax error at correct position).
 
-  public function fnParseExpression($oNoIn, $oRefDestructuringErrors) 
+  public function fnParseExpression($oNoIn=null, $oRefDestructuringErrors=null) 
   {
     $iStartPos = $this->iStart;
     $oStartLoc = $this->oStartLoc;
@@ -2843,7 +2845,7 @@ class Parser
   // Parse an assignment expression. This includes applications of
   // operators like `+=`.
 
-  public function fnParseMaybeAssign($oNoIn, &$oRefDestructuringErrors, $fnAfterLeftParse) 
+  public function fnParseMaybeAssign($oNoIn=null, &$oRefDestructuringErrors=null, $fnAfterLeftParse=null) 
   {
     if ($this->fnIsContextual("yield")) {
       if ($this->fnInGenerator()) 
@@ -2879,7 +2881,7 @@ class Parser
     }
     if ($this->oType->bIsAssign) {
       $oNode = $this->fnStartNodeAt($iStartPos, $oStartLoc);
-      $oNode->sOperator = $this->sValue;
+      $oNode->sOperator = $this->mValue;
       $oNode->oLeft = $this->oType == TokenTypes::$aTypes['eq'] ? 
         $this->fnToAssignable($oLeft, false, $oRefDestructuringErrors) : 
         $oLeft;
@@ -2903,7 +2905,7 @@ class Parser
 
   // Parse a ternary conditional (`?:`) operator.
 
-  public function fnParseMaybeConditional($oNoIn, $oRefDestructuringErrors) 
+  public function fnParseMaybeConditional($oNoIn=null, $oRefDestructuringErrors=null) 
   {
     $iStartPos = $this->iStart;
     $oStartLoc = $this->oStartLoc;
@@ -2923,15 +2925,15 @@ class Parser
 
   // Start the precedence parser.
 
-  public function fnParseExprOps($oNoIn, $oRefDestructuringErrors) 
+  public function fnParseExprOps($oNoIn=null, $oRefDestructuringErrors=null) 
   {
     $iStartPos = $this->iStart;
     $oStartLoc = $this->oStartLoc;
     $oExpr = $this->fnParseMaybeUnary($oRefDestructuringErrors, false);
     if ($this->fnCheckExpressionErrors($oRefDestructuringErrors)) 
       return $oExpr;
-    return $oExpr->iStart === $iStartPos 
-      && $oExpr->sType === "ArrowFunctionExpression" ? 
+    return $oExpr->iStart == $iStartPos 
+      && $oExpr->sType == "ArrowFunctionExpression" ? 
         $oExpr : 
         $this->fnParseExprOp($oExpr, $iStartPos, $oStartLoc, -1, $oNoIn);
   }
@@ -2992,8 +2994,8 @@ class Parser
       if ($bUpdate) 
         $this->fnCheckLVal($oNode->oArgument);
       elseif ($this->bStrict 
-              && $oNode->sOperator === "delete" 
-              && $oNode->oArgument->sType === "Identifier")
+              && $oNode->sOperator == "delete" 
+              && $oNode->oArgument->sType == "Identifier")
         $this->fnRaiseRecoverable($oNode->iStart, "Deleting local variable in strict mode");
       else 
         $bSawUnary = true;
@@ -3026,12 +3028,12 @@ class Parser
     $iStartPos = $this->iStart;
     $oStartLoc = $this->oStartLoc;
     $oExpr = $this->fnParseExprAtom($oRefDestructuringErrors);
-    $bSkipArrowSubscripts = $oExpr->sType === "ArrowFunctionExpression" 
-      && mb_substr($this->sInput, $this->iLastTokStart, $this->iLastTokEnd - $this->iLastTokStart) !== ")";
+    $bSkipArrowSubscripts = $oExpr->sType == "ArrowFunctionExpression" 
+      && mb_substr($this->sInput, $this->iLastTokStart, $this->iLastTokEnd - $this->iLastTokStart) != ")";
     if ($this->fnCheckExpressionErrors($oRefDestructuringErrors) || $bSkipArrowSubscripts) 
       return $oExpr;
     $oResult = $this->fnParseSubscripts($oExpr, $iStartPos, $oStartLoc);
-    if ($oRefDestructuringErrors && $oResult->sType === "MemberExpression") {
+    if ($oRefDestructuringErrors && $oResult->sType == "MemberExpression") {
       if ($oRefDestructuringErrors->iParenthesizedAssign >= $oResult->iStart) 
         $oRefDestructuringErrors->iParenthesizedAssign = -1;
       if ($oRefDestructuringErrors->iParenthesizedBind >= $oResult->iStart) 
@@ -3040,19 +3042,19 @@ class Parser
     return $oResult;
   }
 
-  public function fnParseSubscripts($oBase, $iStartPos, $oStartLoc, $bNoCalls) 
+  public function fnParseSubscripts($oBase, $iStartPos, $oStartLoc, $bNoCalls=false) 
   {
     $bMaybeAsyncArrow = $this->aOptions['ecmaVersion'] >= 8 
-      && $oBase->sType === "Identifier" 
-      && $oBase->sName === "async" 
-      && $this->iLastTokEnd === $oBase->iEnd 
+      && $oBase->sType == "Identifier" 
+      && $oBase->sName == "async" 
+      && $this->iLastTokEnd == $oBase->iEnd 
       && !$this->fnCanInsertSemicolon() 
-      && mb_substr($this->sInput, $oBase->iStart, $oBase->iEnd - $oBase->iStart) === "async";
+      && mb_substr($this->sInput, $oBase->iStart, $oBase->iEnd - $oBase->iStart) == "async";
     for ($bComputed;;) {
       if (($bComputed = $this->fnEat(TokenTypes::$aTypes['bracketL'])) 
            || $this->fnEat(TokenTypes::$aTypes['dot'])) {
         
-        $oNode = $this->fnStartNodeAt(startPos, startLoc);
+        $oNode = $this->fnStartNodeAt($iStartPos, $oStartLoc);
         $oNode->oObject = $oBase;
         $oNode->oProperty = $bComputed ? $this->fnParseExpression() : $this->fnParseIdent(true);
         $oNode->bComputed = !!$bComputed;
@@ -3082,7 +3084,7 @@ class Parser
         $oNode->oCallee = $oBase;
         $oNode->aArguments = $aExprList;
         $oBase = $this->fnFinishNode($oNode, "CallExpression");
-      } else if ($this->sType === TokenTypes::$aTypes['backQuote']) {
+      } else if ($this->oType == TokenTypes::$aTypes['backQuote']) {
         $oNode = $this->fnStartNodeAt($iStartPos, $oStartLoc);
         $oNode->oTag = $oBase;
         $oNode->oQuasi = $this->fnParseTemplate(['bIsTagged' => true]); //?
@@ -3098,10 +3100,10 @@ class Parser
   // `new`, or an expression wrapped in punctuation like `()`, `[]`,
   // or `{}`.
 
-  public function fnParseExprAtom($oRefDestructuringErrors) 
+  public function fnParseExprAtom($oRefDestructuringErrors=null) 
   {
     $oNode;
-    $bCanBeArrow = $this->iPotentialArrowAt === $this->iStart;
+    $bCanBeArrow = $this->iPotentialArrowAt == $this->iStart;
     switch ($this->oType) {
       case TokenTypes::$aTypes['super']:
         if (!$this->inFunction)
@@ -3129,7 +3131,7 @@ class Parser
         $bContainsEsc = $this->bContainsEsc;
         $oId = $this->fnParseIdent($this->oType != TokenTypes::$aTypes['name']);
         if ($this->aOptions['ecmaVersion'] >= 8 
-            && !$bContainsEsc && $oId->sName === "async" 
+            && !$bContainsEsc && $oId->sName == "async" 
             && !$this->fnCanInsertSemicolon() 
             && $this->fnEat(TokenTypes::$aTypes['function']))
           return $this->fnParseFunction($this->fnStartNodeAt($iStartPos, $oStartLoc), 0, false, true);
@@ -3137,7 +3139,7 @@ class Parser
           if ($this->fnEat(TokenTypes::$aTypes['arrow']))
             return $this->fnParseArrowExpression($this->fnStartNodeAt($iStartPos, $oStartLoc), [$oId], false);
           if ($this->aOptions['ecmaVersion'] >= 8 
-              && $oId->sName === "async" 
+              && $oId->sName == "async" 
               && $this->oType == TokenTypes::$aTypes['name'] 
               && !$bContainsEsc) {
             $oId = $this->fnParseIdent();
@@ -3326,7 +3328,7 @@ class Parser
       $oNode->oMeta = $oMeta;
       $bContainsEsc = $this->bContainsEsc;
       $oNode->oProperty = $this->fnParseIdent(true);
-      if ($oNode->oProperty->sName !== "target" || $bContainsEsc)
+      if ($oNode->oProperty->sName != "target" || $bContainsEsc)
         $this->fnRaiseRecoverable($oNode->oProperty->iStart, "The only valid meta property for new is new.target");
       if (!$this->inNonArrowFunction())
         $this->fnRaiseRecoverable($oNode->iStart, "new.target can only be used in functions");
@@ -3390,8 +3392,8 @@ class Parser
   public function fnIsAsyncProp($oProp) 
   {
     return !$oProp->bComputed //?
-      && $oProp->oKey->sType === "Identifier" 
-      && $oProp->oKey->sName === "async" 
+      && $oProp->oKey->sType == "Identifier" 
+      && $oProp->oKey->sName == "async" 
       && ($this->oType == TokenTypes::$aTypes['name'] 
           || $this->oType == TokenTypes::$aTypes['num'] 
           || $this->oType == TokenTypes::$aTypes['string'] 
@@ -3511,9 +3513,9 @@ class Parser
                 && !$bContainsEsc 
                 && $this->aOptions['ecmaVersion'] >= 5 
                 && !$oProp->bComputed 
-                && $oProp->oKey->sType === "Identifier" 
-                && ($oProp->oKey->sName === "get" 
-                    || $oProp->oKey->sName === "set") 
+                && $oProp->oKey->sType == "Identifier" 
+                && ($oProp->oKey->sName == "get" 
+                    || $oProp->oKey->sName == "set") 
                 && ($this->oType != TokenTypes::$aTypes['comma'] 
                     && $this->oType != TokenTypes::$aTypes['braceR'])) {
       if ($bIsGenerator || $bIsAsync) 
@@ -3521,19 +3523,19 @@ class Parser
       $oProp->sKind = $oProp->oKey->sName;
       $this->fnParsePropertyName($oProp);
       $oProp->mValue = $this->fnParseMethod(false);
-      $iParamCount = $oProp->sKind === "get" ? 0 : 1;
-      if (count($oProp->mValue->aParams) !== $iParamCount) {
+      $iParamCount = $oProp->sKind == "get" ? 0 : 1;
+      if (count($oProp->mValue->aParams) != $iParamCount) {
         $iStart = $oProp->mValue->iStart;
-        if ($oProp->sKind === "get")
+        if ($oProp->sKind == "get")
           $this->fnRaiseRecoverable($iStart, "getter should have no params");
         else
           $this->fnRaiseRecoverable($iStart, "setter should have exactly one param");
       } else {
-        if ($oProp->sKind === "set" 
-            && $oProp->mValue->aParams[0]->sType === "RestElement")
+        if ($oProp->sKind == "set" 
+            && $oProp->mValue->aParams[0]->sType == "RestElement")
           $this->fnRaiseRecoverable($oProp->mValue->aParams[0]->iStart, "Setter cannot use rest params");
       }
-    } else if ($this->aOptions['ecmaVersion'] >= 6 && !$oProp->bComputed && $oProp->oKey->sType === "Identifier") {
+    } else if ($this->aOptions['ecmaVersion'] >= 6 && !$oProp->bComputed && $oProp->oKey->sType == "Identifier") {
       $this->fnCheckUnreserved($oProp->oKey);
       $oProp->sKind = "init";
       if ($bIsPattern) {
@@ -3666,7 +3668,7 @@ class Parser
       $oNode->aBody = $this->fnParseBlock(false);
       $oNode->oExpression = false;
       $this->fnAdaptDirectivePrologue($oNode->aBody->aBody);
-      $this->aLabels = aOldLabels;
+      $this->aLabels = $aOldLabels;
     }
     $this->fnExitScope();
 
@@ -3679,9 +3681,10 @@ class Parser
 
   public function fnIsSimpleParamList($aParams) 
   {
-    foreach ($aParams as $oParam)
-      if ($oParam->sType !== "Identifier") 
-        return false;
+    if (is_array($aParams))
+      foreach ($aParams as $oParam)
+        if ($oParam->sType != "Identifier") 
+          return false;
     return true;
   }
 
@@ -3691,8 +3694,9 @@ class Parser
   public function fnCheckParams(&$oNode, $bAllowDuplicates) 
   {
     $aNameHash = [];
-    foreach ($oNode->aParams as &$oParam)
-      $this->fnCheckLVal($oParam, Scope::BIND_VAR, $bAllowDuplicates ? null : $aNameHash);
+    if (is_array($oNode->aParams))
+      foreach ($oNode->aParams as &$oParam)
+        $this->fnCheckLVal($oParam, Scope::BIND_VAR, $bAllowDuplicates ? null : $aNameHash);
   }
 
   // Parses a comma-separated list of expressions, and returns them as
@@ -3701,7 +3705,7 @@ class Parser
   // nothing in between them to be parsed as `null` (which is needed
   // for array literals).
 
-  public function fnParseExprList($oClose, $bAllowTrailingComma, $bAllowEmpty, $oRefDestructuringErrors) 
+  public function fnParseExprList($oClose, $bAllowTrailingComma, $bAllowEmpty, $oRefDestructuringErrors=null) 
   {
     $aElts = [];
     $bFirst = true;
@@ -3733,18 +3737,18 @@ class Parser
     $iStart = $oNode->iStart;
     $iEnd = $oNode->iEnd;
     $sName = $oNode->sName;
-    if ($this->fnInGenerator() && $sName === "yield")
+    if ($this->fnInGenerator() && $sName == "yield")
       $this->fnRaiseRecoverable($iStart, "Can not use 'yield' as identifier inside a generator");
-    if ($this->inAsync && $sName === "await")
+    if ($this->fnInAsync() && $sName == "await")
       $this->fnRaiseRecoverable($iStart, "Can not use 'await' as identifier inside an async function");
-    if (preg_match($this->keywords, $sName))
+    if (preg_match($this->sKeywords, $sName))
       $this->fnRaise($iStart, "Unexpected keyword '{$sName}'");
     if ($this->aOptions['ecmaVersion'] < 6 
-        && strstr(mb_substr($this->sInput, $iStart, $iEnd - $iStart), "\\") !== false) 
+        && strstr(mb_substr($this->sInput, $iStart, $iEnd - $iStart), "\\") != false) 
       return;
     $sRe = $this->bStrict ? $this->sReservedWordsStrict : $this->sReservedWords;
     if (preg_match($sRe, $sName)) {
-      if (!$this->bInAsync && $sName === "await")
+      if (!$this->fnInAsync() && $sName == "await")
         $this->fnRaiseRecoverable($iStart, "Can not use keyword 'await' outside an async function");
       $this->fnRaiseRecoverable($iStart, "The keyword '{$sName}' is reserved");
     }
@@ -3754,9 +3758,9 @@ class Parser
   // when parsing properties), it will also convert keywords into
   // identifiers.
 
-  public function fnParseIdent(&$bLiberal, $bIsBinding) {
+  public function fnParseIdent($bLiberal=false, $bIsBinding=false) {
     $oNode = $this->fnStartNode();
-    if ($bLiberal && $this->aOptions['allowReserved'] === "never") 
+    if ($bLiberal && $this->aOptions['allowReserved'] == "never") 
       $bLiberal = false;
     if ($this->oType == TokenTypes::$aTypes['name']) {
       $oNode->sName = $this->mValue;
@@ -3767,10 +3771,10 @@ class Parser
       // `class` and `function` keywords push new context into $this->context.
       // But there is no chance to pop the context if the keyword is consumed as an identifier such as a property name.
       // If the previous token is a dot, this does not apply because the context-managing code already ignored the keyword
-      if (($oNode->sName === "class" 
-             || $oNode->sName === "function") 
-           && ($this->iLastTokEnd !== $this->iLastTokStart + 1 
-               || Utilities::fnGetCharAt($this->sInput, $this->iLastTokStart) !== 46)) {
+      if (($oNode->sName == "class" 
+             || $oNode->sName == "function") 
+           && ($this->iLastTokEnd != $this->iLastTokStart + 1 
+               || Utilities::fnGetCharAt($this->sInput, $this->iLastTokStart) != 46)) {
         array_pop($this->aContext);
       }
     } else {
@@ -3845,7 +3849,7 @@ class Parser
       $bResult = preg_match(Whitespace::lineBreak, $this->sInput, $aMatches, PREG_OFFSET_CAPTURE, $iCur);
       if ($bResult && $aMatches[0][1] < $iOffset) {
         ++$iLine;
-        $iCur = $aMatches[0][1] + mb_strlen($aMatches[0]);
+        $iCur = $aMatches[0][1] + mb_strlen($aMatches[0][0]);
       } else {
         return new Position($iLine, $iOffset - $iCur);
       }
@@ -3868,24 +3872,24 @@ class Parser
     
   public function fnParseI()
   {
-    $oNode = $this->aOptions['program'] || $this->fnStartNode();
+    $oNode = !empty($this->aOptions['program']) ? $this->aOptions['program'] : $this->fnStartNode();
     $this->fnNextToken();
     return $this->fnParseTopLevel($oNode);
   }
   
-  public static function fnParse($sInput, $aOptions)
+  public static function fnParse($sInput, $aOptions=[])
   {
     return (new self($aOptions, $sInput))->fnParseI();
   }
   
-  public static function fnParseExpressionAt($sInput, $iPos, $aOptions)
+  public static function fnParseExpressionAt($sInput, $iPos, $aOptions=[])
   {
     $oParser = new self($aOptions, $sInput, $iPos);
     $oParser->fnNextToken();
     return $oParser->fnParseExpression();
   }
   
-  public static function fnTokenizer($sInput, $aOptions)
+  public static function fnTokenizer($sInput, $aOptions=[])
   {
     return new self($aOptions, $sInput);
   }

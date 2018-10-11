@@ -6,7 +6,9 @@ class Utilities
 {
   public static function fnGetCharAt($sString, $iIndex)
   {
-    return preg_split('/(?<!^)(?!$)/u', $sString)[$iIndex];
+    //return preg_split('/(?<!^)(?!$)/u', $sString)[$iIndex];
+    // FIXME:
+    return preg_split('/\X{1}\K/u', $sString)[$iIndex];
   }
 
   public static function fnGetCharCodeAt($sString, $iIndex)
