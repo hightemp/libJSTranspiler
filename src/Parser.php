@@ -739,7 +739,7 @@ class Parser
 
   public function fnParseWithStatement(&$oNode)
   {
-    if ($this->strict) 
+    if ($this->bStrict) 
       $this->Raise($this->iStart, "'with' in strict mode");
     $this->fnNext();
     $oNode->oObject = $this->fnParseParenExpression();
