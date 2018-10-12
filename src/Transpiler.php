@@ -116,50 +116,53 @@ class Transpiler
     $this->aOpts = $aOpts;
   }
 
-  public function fnBody($oNode) 
+  public function fnBody($oNode, &$oParent) 
   {
     $aOpts = $this->aOpts;
-    $oScopeNode = ($oNode->sType === 'BlockStatement') ? $oNode->rParent : $oNode;
+    $oScopeNode = ($oNode->sType === 'BlockStatement') ? $oParent : $oNode;
     $oScopeIndex = $oScopeNode->oScopeIndex;
     $aResults = [];
+    
     $aOpts['indentLevel'] += 1;
+    
     if (scopeIndex.thisFound) {
-      if (node.type === 'Program') {
-        results.push(this.indent() + '$this_ = $global;\n');
+      if ($oNode->sType === 'Program') {
+        array_push($aResults, $this->fnIndent() . '$this_ = $global;\n');
       } else {
-        results.push(this.indent() + '$this_ = Func::getContext();\n');
+        array_push($aResults, $this->fnIndent() . '$this_ = Func::getContext();\n');
       }
     }
-    if (scopeIndex.argumentsFound && node.type !== 'Program') {
-      results.push(this.indent() + '$arguments = Func::getArguments();\n');
+    if (scopeIndex.argumentsFound && $oNode->sType !== 'Program') {
+      array_push($aResults, $this->fnIndent() . '$arguments = Func::getArguments();\n');
     }
-    if (node.vars && opts.initVars) {
-      var declarations = [];
-      Object.keys(node.vars).forEach(function(name) {
-        declarations.push(encodeVarName(name) + ' = null;');
-      });
+    if ($oNode->aVars && $aOpts['initVars']) {
+      $aDeclarations = [];
+      foreach($oNode->aVars as $sName => $sValue) {
+        array_push($aDeclarations, $this->fnEncodeVarName($sName) . ' = null;');
+      };
       if (declarations.length) {
-        results.push(this.indent() + declarations.join(' ') + '\n');
+        array_push($aResults, $this->fnIndent() . join(' ', $aDeclarations) . '\n');
       }
     }
-    var funcDeclarations = node.funcs;
-    if (funcDeclarations) {
-      Object.keys(funcDeclarations).forEach(function(name) {
-        var func = this.FunctionExpression(funcDeclarations[name]);
-        results.push(this.indent() + encodeVarName(name) + ' = ' + func + ';\n');
-      }, this);
+    $aFuncDeclarations = $oNode->aFuncs;
+    if ($aFuncDeclarations) {
+      foreach($aFuncDeclarations as $sName => $sValue) {
+        $sFunc = $this->fnFunctionExpression($aFuncDeclarations[$sName]);
+        array_push($aResults, $this->fnIndent() . $this->fnEncodeVarName($sName) . ' = ' . $sFunc . ';\n');
+      };
     }
 
-    node.body.forEach(function(node) {
-      var result = this.generate(node);
-      if (result) {
-        results.push(this.indent() + result);
+    foreach($oNode->aBody as $oNode) {
+      $sResult = $this->fnGenerate($oNode, $oParent);
+      if ($sResult) {
+        array_push($aResults, $this->fnIndent() . $sResult);
       }
-    }, this);
-    if (opts.indentLevel > 0) {
-      opts.indentLevel -= 1;
     }
-    return results.join('');
+    
+    if ($aOpts['indentLevel'] > 0) {
+      $aOpts['indentLevel'] -= 1;
+    }
+    return join('', $aResults);
   }
   
   public function fnIsStrictDirective($oStmt)
@@ -245,32 +248,28 @@ class Transpiler
     return 'new RegExp(' + encodeString(source) + ', ' + encodeString(flags) + ')';
   }
 
-  function fnEncodeString($mValue) {
+  public function fnEncodeString($mValue) {
     return Utilities::fnEncodeString($mValue);
   }
 
-  function fnEncodeVar(identifier) {
+  public function fnEncodeVar(identifier) {
     var name = identifier.name;
     return encodeVarName(name, identifier.appendSuffix);
   }
 
-  function encodeVarName(name, suffix) {
-    return utils.encodeVarName(name, suffix);
+  public function fnEncodeVarName($sName, $sSuffix) {
+    return Utilities::fnEncodeVarName($sName, $sSuffix);
   }
 
-  function repeat(str, count) {
-    return new Array(count + 1).join(str);
+  public function fnIsWord($sStr) {
+    return preg_match("/^\w+$/", $sStr);
   }
 
-  function isWord(str) {
-    return str.match(/^[a-z_]+$/) ? true : false;
-  }
-
-  function opPrecedence(op) {
-    return BINARY_PRECEDENCE[op];
+  public function fnOpPrecedence($sOp) {
+    return self::BINARY_PRECEDENCE[$sOp];
   }
   
-  public function fnGenerate($oNode)
+  public function fnGenerate($oNode, &$oParent=null)
   {
     $aOpts = $this->aOpts;
     if (!isset($aOpts['indentLevel']) || !$aOpts['indentLevel']) {
@@ -286,13 +285,13 @@ class Transpiler
       //STATEMENTS
       case 'Program':
         $aOpts['isStrict'] = $this->fnIsStrictDirective($oNode->aBody[0]);
-        $sResult = $this->fnBody($oNode);
+        $sResult = $this->fnBody($oNode, $oParent);
         break;
       case 'ExpressionStatement':
-        $sResult = $this->fnIsStrictDirective($oNode) ? '' : $this->fnGenerate($oNode->oExpression) . ';\n';
+        $sResult = $this->fnIsStrictDirective($oNode) ? '' : $this->fnGenerate($oNode->oExpression, $oNode) . ';\n';
         break;
       case 'ReturnStatement':
-        $sResult = 'return ' . $this->fnGenerate($oNode->oArgument) . ';\n';
+        $sResult = 'return ' . $this->fnGenerate($oNode->oArgument, $oNode) . ';\n';
         break;
       case 'ContinueStatement':
         $sResult = 'continue;\n';
@@ -333,10 +332,10 @@ class Transpiler
 
       //EXPRESSIONS
       case 'Literal':
-        $sResult = encodeLiteral(node.value);
+        $sResult = $this->fnEncodeLiteral($oNode->mValue);
         break;
       case 'Identifier':
-        $sResult = encodeVar(node);
+        $sResult = $this->fnEncodeVar($oNode);
         break;
       case 'ThisExpression':
         $sResult = '$this_';

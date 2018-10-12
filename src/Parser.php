@@ -16,6 +16,7 @@ use libJSTranspiler\Label;
 use libJSTranspiler\DestructuringErrors;
 use libJSTranspiler\Position;
 use libJSTranspiler\SyntaxError;
+use libJSTranspiler\RegExpValidationState;
 use Closure;
 use Exception;
 
@@ -1017,7 +1018,7 @@ class Parser
         && ($oKey->sType == "Identifier" 
             && $oKey->sName == "constructor" 
             || $oKey->sType == "Literal" 
-            && $oKey->sValue == "constructor")) {
+            && $oKey->mValue == "constructor")) {
       if ($oMethod->sKind != "method") 
         $this->fnRaise($oKey->iStart, "Constructor can't have get/set modifier");
       if ($bIsGenerator) 
@@ -1031,19 +1032,19 @@ class Parser
       $this->fnRaise($oKey->iStart, "Classes may not have a static property named prototype");
     }
     $this->fnParseClassMethod($oMethod, $bIsGenerator, $bIsAsync);
-    if ($oMethod->sKind == "get" && count($oMethod->oValue->aParams) != 0)
-      $this->fnRaiseRecoverable($oMethod->oValue->iStart, "getter should have no params");
-    if ($oMethod->sKind == "set" && count($oMethod->oValue->aParams) != 1)
+    if ($oMethod->sKind == "get" && count($oMethod->mValue->aParams) != 0)
+      $this->fnRaiseRecoverable($oMethod->mValue->iStart, "getter should have no params");
+    if ($oMethod->sKind == "set" && count($oMethod->mValue->aParams) != 1)
       $this->fnRaiseRecoverable(method.value.start, "setter should have exactly one param");
-    if ($oMethod->sKind == "set" && $oMethod->oValue->aParams[0]->sType == "RestElement")
-      $this->fnRaiseRecoverable($oMethod->oValue->aParams[0].iStart, "Setter cannot use rest params");
+    if ($oMethod->sKind == "set" && $oMethod->mValue->aParams[0]->sType == "RestElement")
+      $this->fnRaiseRecoverable($oMethod->mValue->aParams[0].iStart, "Setter cannot use rest params");
     
     return $oMethod;
   }
 
   public function fnParseClassMethod(&$oMethod, $bIsGenerator, $bIsAsync)
   {
-    $oMethod->oValue = $this->fnParseMethod($bIsGenerator, $bIsAsync);
+    $oMethod->mValue = $this->fnParseMethod($bIsGenerator, $bIsAsync);
     return $this->fnFinishNode($oMethod, "MethodDefinition");
   }
 
@@ -1150,7 +1151,7 @@ class Parser
           $this->fnCheckPatternExport($aExports, $oElt);
       }
     else if ($sType == "Property")
-      $this->fnCheckPatternExport($aExports, $oPat->oValue);
+      $this->fnCheckPatternExport($aExports, $oPat->mValue);
     else if ($sType == "AssignmentPattern")
       $this->fnCheckPatternExport($aExports, $oPat->oLeft);
     else if ($sType == "RestElement")
@@ -2103,7 +2104,7 @@ class Parser
     $sPattern = mb_substr($this->sInput, $iStart, $this->iPos - $iStart);
     ++$this->iPos;
     $iFlagsStart = $this->iPos;
-    $iFlags = $this->fnReadWord1();
+    $sFlags = $this->fnReadWord1();
     
     if ($this->bContainsEsc) 
       $this->fnUnexpected($iFlagsStart);
@@ -2112,12 +2113,12 @@ class Parser
     $oState = $this->oRegexpState ? 
       $this->oRegexpState : 
       $this->oRegexpState = new RegExpValidationState($this);
-    $oState->fnReset($iStart, $sPattern, $iFlags);
+    $oState->fnReset($iStart, $sPattern, $sFlags);
     $this->fnValidateRegExpFlags($oState);
     $this->fnValidateRegExpPattern($oState);
 
     // Create Literal#value property value.
-    $oValue = null;
+    $mValue = null;
     /*
     try {
       value = new RegExp(pattern, flags)
@@ -2126,7 +2127,7 @@ class Parser
       // https://github.com/estree/estree/blob/a27003adf4fd7bfad44de9cef372a2eacd527b1c/es5.md#regexpliteral
     }
     */
-    return $this->fnFinishToken(TokenTypes::$aTypes['regexp'], [$sPattern, $iFlags, $oValue]);
+    return $this->fnFinishToken(TokenTypes::$aTypes['regexp'], [ 'sPattern' => $sPattern, 'sFlags' => $sFlags, 'mValue' => $mValue]);
   }
 
   // Read an integer in the given radix. Return null if zero digits
@@ -2536,7 +2537,7 @@ class Parser
         // AssignmentProperty has type == "Property"
         if ($oNode->sKind != "init") 
           $this->fnRaise($oNode->oKey->iStart, "Object pattern can't contain getter or setter");
-        $this->fnToAssignable($oNode->oValue, $bIsBinding);
+        $this->fnToAssignable($oNode->mValue, $bIsBinding);
         break;
 
       case "ArrayExpression":
@@ -2731,7 +2732,7 @@ class Parser
 
       case "Property":
         // AssignmentProperty has type == "Property"
-        $this->fnCheckLVal($oExpr->oValue, $iBindingType, $aCheckClashes);
+        $this->fnCheckLVal($oExpr->mValue, $iBindingType, $aCheckClashes);
         break;
 
       case "ArrayPattern":
@@ -2766,12 +2767,12 @@ class Parser
       return;
     $oKey = $oProp->oKey;
     $sName;
-    switch (key.type) {
+    switch ($oKey->sType) {
       case "Identifier": 
         $sName = $oKey->sName; 
         break;
       case "Literal": 
-        $sName = $oKey->sValue; //?
+        $sName = $oKey->mValue; //?
         break;
       default: 
         return;
@@ -3153,8 +3154,8 @@ class Parser
 
       case TokenTypes::$aTypes['regexp']:
         $mValue = $this->mValue;
-        $oNode = $this->fnParseLiteral($mValue->sValue);
-        $oNode->aRegex = [ 'sPattern' => $mValue->sPattern, 'sFlags' => $mValue->sFlags]; //?
+        $oNode = $this->fnParseLiteral($mValue['mValue']);
+        $oNode->aRegex = [ 'sPattern' => $mValue['sPattern'], 'sFlags' => $mValue['sFlags']]; //?
         return $oNode;
 
       case TokenTypes::$aTypes['num']: 
@@ -3869,7 +3870,1004 @@ class Parser
   {
     return ($this->fnCurrentVarScope()->iFlags & Scope::SCOPE_ASYNC) > 0;
   }
-    
+
+  public function fnCodePointToString($iCh) 
+  {
+    if ($iCh <= 0xFFFF) 
+      return Utilities::fnUnichr($iCh);
+    $iCh -= 0x10000;
+    return Utilities::fnUnichr(($iCh >> 10) + 0xD800, ($iCh & 0x03FF) + 0xDC00);
+  }
+
+  /**
+   * Validate the flags part of a given RegExpLiteral.
+   *
+   * @param {RegExpValidationState} state The state to validate RegExp.
+   * @returns {void}
+   */
+  public function fnValidateRegExpFlags(&$oState) 
+  {
+    $sValidFlags = $oState->sValidFlags;
+    $sFlags = $oState->sFlags;
+
+    for ($iI = 0; $iI < mb_strlen($oState->sFlags); $iI++) {
+      $sFlag = Utilities::fnGetCharAt($oState->sFlags, $iI);
+      if (mb_strpos($sValidFlags, $sFlag) === false) {
+        $this->fnRaise($oState->iStart, "Invalid regular expression flag");
+      }
+      if (mb_strpos($sFlags, $sFlag, $iI + 1) !== false) {
+        $this->fnRaise($oState->iStart, "Duplicate regular expression flag");
+      }
+    }
+  }
+
+  /**
+   * Validate the pattern part of a given RegExpLiteral.
+   *
+   * @param {RegExpValidationState} state The state to validate RegExp.
+   * @returns {void}
+   */
+  public function fnValidateRegExpPattern(&$oState) 
+  {
+    $this->fnRegexp_pattern($oState);
+
+    // The goal symbol for the parse is |Pattern[~U, ~N]|. If the result of
+    // parsing contains a |GroupName|, reparse with the goal symbol
+    // |Pattern[~U, +N]| and use this result instead. Throw a *SyntaxError*
+    // exception if _P_ did not conform to the grammar, if any elements of _P_
+    // were not matched by the parse, or if any Early Error conditions exist.
+    if (!$oState->bSwitchN && $this->aOptions['ecmaVersion'] >= 9 && count($oState->aGroupNames) > 0) {
+      $oState->bSwitchN = true;
+      $this->fnRegexp_pattern($oState);
+    }
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-Pattern
+  public function fnRegexp_pattern(&$oState) 
+  {
+    $oState->iPos = 0;
+    $oState->iLastIntValue = 0;
+    $oState->sLastStringValue = "";
+    $oState->bLastAssertionIsQuantifiable = false;
+    $oState->iNumCapturingParens = 0;
+    $oState->iMaxBackReference = 0;
+    $oState->aGroupNames = [];
+    $oState->aBackReferenceNames = [];
+
+    $this->fnRegexp_disjunction($oState);
+
+    if ($oState->iPos !== mb_strlen($oState->sSource)) {
+      // Make the same messages as V8.
+      if ($oState->fnEat(0x29 /* ) */)) {
+        $oState->fnRaise("Unmatched ')'");
+      }
+      if ($oState->fnEat(0x5D /* [ */) || $oState->fnEat(0x7D /* } */)) {
+        $oState->fnRaise("Lone quantifier brackets");
+      }
+    }
+    if ($oState->iMaxBackReference > $oState->iNumCapturingParens) {
+      $oState->fnRaise("Invalid escape");
+    }
+    foreach ($oState->aBackReferenceNames as $sName) {
+      if (!in_array($sName, $oState->aGroupNames)) {
+        $oState->fnRaise("Invalid named capture referenced");
+      }
+    }
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-Disjunction
+  public function fnRegexp_disjunction(&$oState) 
+  {
+    $this->fnRegexp_alternative($oState);
+    while ($oState->fnEat(0x7C /* | */)) {
+      $this->fnRegexp_alternative($oState);
+    }
+
+    // Make the same message as V8.
+    if ($this->fnRegexp_eatQuantifier($oState, true)) {
+      $oState->fnRaise("Nothing to repeat");
+    }
+    if ($oState->fnEat(0x7B /* { */)) {
+      $oState->fnRaise("Lone quantifier brackets");
+    }
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-Alternative
+  public function fnRegexp_alternative(&$oState) 
+  {
+    while ($oState->iPos < mb_strlen($oState->sSource) && $this->fnRegexp_eatTerm($oState));
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-annexB-Term
+  public function fnRegexp_eatTerm(&$oState) 
+  {
+    if ($this->fnRegexp_eatAssertion($oState)) {
+      // Handle `QuantifiableAssertion Quantifier` alternative.
+      // `$oState->bLastAssertionIsQuantifiable` is true if the last eaten Assertion
+      // is a QuantifiableAssertion.
+      if ($oState->bLastAssertionIsQuantifiable && $this->fnRegexp_eatQuantifier($oState)) {
+        // Make the same message as V8.
+        if ($oState->bSwitchU) {
+          $oState->fnRaise("Invalid quantifier");
+        }
+      }
+      return true;
+    }
+
+    if ($oState->bSwitchU ? $this->fnRegexp_eatAtom($oState) : $this->fnRegexp_eatExtendedAtom($oState)) {
+      $this->fnRegexp_eatQuantifier($oState);
+      return true;
+    }
+
+    return false;
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-annexB-Assertion
+  public function fnRegexp_eatAssertion(&$oState) 
+  {
+    $iStart = $oState->iPos;
+    $oState->bLastAssertionIsQuantifiable = false;
+
+    // ^, $
+    if ($oState->fnEat(0x5E /* ^ */) || $oState->fnEat(0x24 /* $ */)) {
+      return true;
+    }
+
+    // \b \B
+    if ($oState->fnEat(0x5C /* \ */)) {
+      if ($oState->fnEat(0x42 /* B */) || $oState->fnEat(0x62 /* b */)) {
+        return true;
+      }
+      $oState->iPos = $iStart;
+    }
+
+    // Lookahead / Lookbehind
+    if ($oState->fnEat(0x28 /* ( */) && $oState->fnEat(0x3F /* ? */)) {
+      $bLookbehind = false;
+      if ($this->aOptions['ecmaVersion'] >= 9) {
+        $bLookbehind = $oState->fnEat(0x3C /* < */);
+      }
+      if ($oState->fnEat(0x3D /* = */) || $oState->fnEat(0x21 /* ! */)) {
+        $this->fnRegexp_disjunction($oState);
+        if (!$oState->fnEat(0x29 /* ) */)) {
+          $oState->fnRaise("Unterminated group");
+        }
+        $oState->bLastAssertionIsQuantifiable = !$bLookbehind;
+        return true;
+      }
+    }
+
+    $oState->iPos = $iStart;
+    return false;
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-Quantifier
+  public function fnRegexp_eatQuantifier(&$oState, $bNoError = false) 
+  {
+    if ($this->fnRegexp_eatQuantifierPrefix($oState, $bNoError)) {
+      $oState->fnEat(0x3F /* ? */);
+      return true;
+    }
+    return false;
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-QuantifierPrefix
+  public function fnRegexp_eatQuantifierPrefix(&$oState, $bNoError) 
+  {
+    return (
+      $oState->fnEat(0x2A /* * */) ||
+      $oState->fnEat(0x2B /* + */) ||
+      $oState->fnEat(0x3F /* ? */) ||
+      $this->fnRegexp_eatBracedQuantifier($oState, $bNoError)
+    );
+  }
+  public function fnRegexp_eatBracedQuantifier(&$oState, $bNoError) 
+  {
+    $iStart = $oState->iPos;
+    if ($oState->fnEat(0x7B /* { */)) {
+      $iMin = 0;
+      $iMax = -1;
+      if ($this->fnRegexp_eatDecimalDigits($oState)) {
+        $iMin = $oState->iLastIntValue;
+        if ($oState->fnEat(0x2C /* , */) && $this->fnRegexp_eatDecimalDigits($oState)) {
+          $iMax = $oState->iLastIntValue;
+        }
+        if ($oState->fnEat(0x7D /* } */)) {
+          // SyntaxError in https://www.ecma-international.org/ecma-262/8.0/#sec-term
+          if ($iMax !== -1 && $iMax < $iMin && !$bNoError) {
+            $oState->fnRaise("numbers out of order in {} quantifier");
+          }
+          return true;
+        }
+      }
+      if ($oState->bSwitchU && !$bNoError) {
+        $oState->fnRaise("Incomplete quantifier");
+      }
+      $oState->iPos = $iStart;
+    }
+    return false;
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-Atom
+  public function fnRegexp_eatAtom(&$oState) 
+  {
+    return (
+      $this->fnRegexp_eatPatternCharacters($oState) ||
+      $oState->fnEat(0x2E /* . */) ||
+      $this->fnRegexp_eatReverseSolidusAtomEscape($oState) ||
+      $this->fnRegexp_eatCharacterClass($oState) ||
+      $this->fnRegexp_eatUncapturingGroup($oState) ||
+      $this->fnRegexp_eatCapturingGroup($oState)
+    );
+  }
+  
+  public function fnRegexp_eatReverseSolidusAtomEscape(&$oState) 
+  {
+    $iStart = $oState->iPos;
+    if ($oState->fnEat(0x5C /* \ */)) {
+      if ($this->fnRegexp_eatAtomEscape($oState)) {
+        return true;
+      }
+      $oState->iPos = $iStart;
+    }
+    return false;
+  }
+  
+  public function fnRegexp_eatUncapturingGroup(&$oState) 
+  {
+    $iStart = $oState->iPos;
+    if ($oState->fnEat(0x28 /* ( */)) {
+      if ($oState->fnEat(0x3F /* ? */) && $oState->fnEat(0x3A /* : */)) {
+        $this->fnRegexp_disjunction($oState);
+        if ($oState->fnEat(0x29 /* ) */)) {
+          return true;
+        }
+        $oState->fnRaise("Unterminated group");
+      }
+      $oState->iPos = $iStart;
+    }
+    return false;
+  }
+  
+  public function fnRegexp_eatCapturingGroup(&$oState) 
+  {
+    if ($oState->fnEat(0x28 /* ( */)) {
+      if ($this->aOptions['ecmaVersion'] >= 9) {
+        $this->fnRegexp_groupSpecifier($oState);
+      } else if ($oState->fnCurrent() === 0x3F /* ? */) {
+        $oState->fnRaise("Invalid group");
+      }
+      $this->fnRegexp_disjunction($oState);
+      if ($oState->fnEat(0x29 /* ) */)) {
+        $oState->iNumCapturingParens += 1;
+        return true;
+      }
+      $oState->fnRaise("Unterminated group");
+    }
+    return false;
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-annexB-ExtendedAtom
+  public function fnRegexp_eatExtendedAtom(&$oState) 
+  {
+    return (
+      $oState->fnEat(0x2E /* . */) ||
+      $this->fnRegexp_eatReverseSolidusAtomEscape($oState) ||
+      $this->fnRegexp_eatCharacterClass($oState) ||
+      $this->fnRegexp_eatUncapturingGroup($oState) ||
+      $this->fnRegexp_eatCapturingGroup($oState) ||
+      $this->fnRegexp_eatInvalidBracedQuantifier($oState) ||
+      $this->fnRegexp_eatExtendedPatternCharacter($oState)
+    );
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-annexB-InvalidBracedQuantifier
+  public function fnRegexp_eatInvalidBracedQuantifier(&$oState) 
+  {
+    if ($this->fnRegexp_eatBracedQuantifier($oState, true)) {
+      $oState->fnRaise("Nothing to repeat");
+    }
+    return false;
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-SyntaxCharacter
+  public function fnRegexp_eatSyntaxCharacter(&$oState) 
+  {
+    $iCh = $oState->fnCurrent();
+    if ($this->fnIsSyntaxCharacter($iCh)) {
+      $oState->iLastIntValue = $iCh;
+      $oState->fnAdvance();
+      return true;
+    }
+    return false;
+  }
+  
+  public function fnIsSyntaxCharacter($iCh) 
+  {
+    return (
+      $iCh === 0x24 /* $ */ ||
+      $iCh >= 0x28 /* ( */ && $iCh <= 0x2B /* + */ ||
+      $iCh === 0x2E /* . */ ||
+      $iCh === 0x3F /* ? */ ||
+      $iCh >= 0x5B /* [ */ && $iCh <= 0x5E /* ^ */ ||
+      $iCh >= 0x7B /* { */ && $iCh <= 0x7D /* } */
+    );
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-PatternCharacter
+  // But eat eager.
+  public function fnRegexp_eatPatternCharacters(&$oState) 
+  {
+    $iStart = $oState->iPos;
+    $iCh = 0;
+    while (($iCh = $oState->fnCurrent()) !== -1 && !$this->fnIsSyntaxCharacter($iCh)) {
+      $oState->fnAdvance();
+    }
+    return $oState->iPos !== $iStart;
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-annexB-ExtendedPatternCharacter
+  public function fnRegexp_eatExtendedPatternCharacter(&$oState) 
+  {
+    $iCh = $oState->fnCurrent();
+    if (
+      $iCh !== -1 &&
+      $iCh !== 0x24 /* $ */ &&
+      !($iCh >= 0x28 /* ( */ && $iCh <= 0x2B /* + */) &&
+      $iCh !== 0x2E /* . */ &&
+      $iCh !== 0x3F /* ? */ &&
+      $iCh !== 0x5B /* [ */ &&
+      $iCh !== 0x5E /* ^ */ &&
+      $iCh !== 0x7C /* | */
+    ) {
+      $oState->fnAdvance();
+      return true;
+    }
+    return false;
+  }
+
+  // GroupSpecifier[U] ::
+  //   [empty]
+  //   `?` GroupName[?U]
+  public function fnRegexp_groupSpecifier(&$oState) 
+  {
+    if ($oState->fnEat(0x3F /* ? */)) {
+      if ($this->fnRegexp_eatGroupName($oState)) {
+        if (in_array($oState->sLastStringValue, $oState->aGroupNames)) {
+          $oState->fnRaise("Duplicate capture group name");
+        }
+        array_push($oState->aGroupNames, $oState->sLastStringValue);
+        return;
+      }
+      $oState->fnRaise("Invalid group");
+    }
+  }
+
+  // GroupName[U] ::
+  //   `<` RegExpIdentifierName[?U] `>`
+  // Note: this updates `$oState->sLastStringValue` property with the eaten name.
+  public function fnRegexp_eatGroupName(&$oState) 
+  {
+    $oState->sLastStringValue = "";
+    if ($oState->fnEat(0x3C /* < */)) {
+      if ($this->fnRegexp_eatRegExpIdentifierName($oState) && $oState->fnEat(0x3E /* > */)) {
+        return true;
+      }
+      $oState->fnRaise("Invalid capture group name");
+    }
+    return false;
+  }
+
+  // RegExpIdentifierName[U] ::
+  //   RegExpIdentifierStart[?U]
+  //   RegExpIdentifierName[?U] RegExpIdentifierPart[?U]
+  // Note: this updates `$oState->sLastStringValue` property with the eaten name.
+  public function fnRegexp_eatRegExpIdentifierName(&$oState) 
+  {
+    $oState->sLastStringValue = "";
+    if ($this->fnRegexp_eatRegExpIdentifierStart($oState)) {
+      $oState->sLastStringValue += $this->fnCodePointToString($oState->iLastIntValue);
+      while ($this->fnRegexp_eatRegExpIdentifierPart($oState)) {
+        $oState->sLastStringValue += $this->fnCodePointToString($oState->iLastIntValue);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  // RegExpIdentifierStart[U] ::
+  //   UnicodeIDStart
+  //   `$`
+  //   `_`
+  //   `\` RegExpUnicodeEscapeSequence[?U]
+  public function fnRegexp_eatRegExpIdentifierStart(&$oState) 
+  {
+    $iStart = $oState->iPos;
+    $iCh = $oState->fnCurrent();
+    $oState->fnAdvance();
+
+    if ($iCh === 0x5C /* \ */ && $this->fnRegexp_eatRegExpUnicodeEscapeSequence($oState)) {
+      $iCh = $oState->iLastIntValue;
+    }
+    if ($this->fnIsRegExpIdentifierStart($iCh)) {
+      $oState->iLastIntValue = $iCh;
+      return true;
+    }
+
+    $oState->iPos = $iStart;
+    return false;
+  }
+  
+  public function fnIsRegExpIdentifierStart($iCh) 
+  {
+    return $this->fnIsIdentifierStart($iCh, true) || $iCh === 0x24 /* $ */ || $iCh === 0x5F; /* _ */
+  }
+
+  // RegExpIdentifierPart[U] ::
+  //   UnicodeIDContinue
+  //   `$`
+  //   `_`
+  //   `\` RegExpUnicodeEscapeSequence[?U]
+  //   <ZWNJ>
+  //   <ZWJ>
+  public function fnRegexp_eatRegExpIdentifierPart(&$oState) 
+  {
+    $iStart = $oState->iPos;
+    $iCh = $oState->fnCurrent();
+    $oState->fnAdvance();
+
+    if ($iCh === 0x5C /* \ */ && $this->fnRegexp_eatRegExpUnicodeEscapeSequence($oState)) {
+      $iCh = $oState->iLastIntValue;
+    }
+    if ($this->fnIsRegExpIdentifierPart($iCh)) {
+      $oState->iLastIntValue = $iCh;
+      return true;
+    }
+
+    $oState->iPos = $iStart;
+    return false;
+  }
+  
+  public function fnIsRegExpIdentifierPart($iCh) 
+  {
+    return $this->fnIsIdentifierChar($iCh, true) || $iCh === 0x24 /* $ */ || $iCh === 0x5F /* _ */ || $iCh === 0x200C /* <ZWNJ> */ || $iCh === 0x200D; /* <ZWJ> */
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-annexB-AtomEscape
+  public function fnRegexp_eatAtomEscape(&$oState) 
+  {
+    if (
+      $this->fnRegexp_eatBackReference($oState) ||
+      $this->fnRegexp_eatCharacterClassEscape($oState) ||
+      $this->fnRegexp_eatCharacterEscape($oState) ||
+      ($oState->bSwitchN && $this->fnRegexp_eatKGroupName($oState))
+    ) {
+      return true;
+    }
+    if ($oState->bSwitchU) {
+      // Make the same message as V8.
+      if ($oState->fnCurrent() === 0x63 /* c */) {
+        $oState->fnRaise("Invalid unicode escape");
+      }
+      $oState->fnRaise("Invalid escape");
+    }
+    return false;
+  }
+  
+  public function fnRegexp_eatBackReference(&$oState) 
+  {
+    $iStart = $oState->iPos;
+    if ($this->fnRegexp_eatDecimalEscape($oState)) {
+      $iN = $oState->iLastIntValue;
+      if ($oState->bSwitchU) {
+        // For SyntaxError in https://www.ecma-international.org/ecma-262/8.0/#sec-atomescape
+        if ($iN > $oState->iMaxBackReference) {
+          $oState->iMaxBackReference = $iN;
+        }
+        return true;
+      }
+      if ($iN <= $oState->iNumCapturingParens) {
+        return true;
+      }
+      $oState->iPos = $iStart;
+    }
+    return false;
+  }
+  
+  public function fnRegexp_eatKGroupName(&$oState) 
+  {
+    if ($oState->fnEat(0x6B /* k */)) {
+      if ($this->fnRegexp_eatGroupName($oState)) {
+        array_push($oState->aBackReferenceNames, $oState->sLastStringValue);
+        return true;
+      }
+      $oState->fnRaise("Invalid named reference");
+    }
+    return false;
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-annexB-CharacterEscape
+  public function fnRegexp_eatCharacterEscape(&$oState) 
+  {
+    return (
+      $this->fnRegexp_eatControlEscape($oState) ||
+      $this->fnRegexp_eatCControlLetter($oState) ||
+      $this->fnRegexp_eatZero($oState) ||
+      $this->fnRegexp_eatHexEscapeSequence($oState) ||
+      $this->fnRegexp_eatRegExpUnicodeEscapeSequence($oState) ||
+      (!$oState->bSwitchU && $this->fnRegexp_eatLegacyOctalEscapeSequence($oState)) ||
+      $this->regexp_eatIdentityEscape($oState)
+    );
+  }
+  public function fnregexp_eatCControlLetter = function(state) {
+    const start = state.pos
+    if ($oState->fnEat(0x63 /* c */)) {
+      if ($this->regexp_eatControlLetter(state)) {
+        return true
+      }
+      state.pos = start
+    }
+    return false
+  }
+  public function fnregexp_eatZero = function(state) {
+    if (state.current() === 0x30 /* 0 */ && !isDecimalDigit(state.lookahead())) {
+      $oState->iLastIntValue = 0
+      state.advance()
+      return true
+    }
+    return false
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-ControlEscape
+  public function fnregexp_eatControlEscape = function(state) {
+    const ch = state.current()
+    if (ch === 0x74 /* t */) {
+      $oState->iLastIntValue = 0x09 /* \t */
+      state.advance()
+      return true
+    }
+    if (ch === 0x6E /* n */) {
+      $oState->iLastIntValue = 0x0A /* \n */
+      state.advance()
+      return true
+    }
+    if (ch === 0x76 /* v */) {
+      $oState->iLastIntValue = 0x0B /* \v */
+      state.advance()
+      return true
+    }
+    if (ch === 0x66 /* f */) {
+      $oState->iLastIntValue = 0x0C /* \f */
+      state.advance()
+      return true
+    }
+    if (ch === 0x72 /* r */) {
+      $oState->iLastIntValue = 0x0D /* \r */
+      state.advance()
+      return true
+    }
+    return false
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-ControlLetter
+  public function fnregexp_eatControlLetter = function(state) {
+    const ch = state.current()
+    if (isControlLetter(ch)) {
+      $oState->iLastIntValue = ch % 0x20
+      state.advance()
+      return true
+    }
+    return false
+  }
+  function isControlLetter(ch) {
+    return (
+      (ch >= 0x41 /* A */ && ch <= 0x5A /* Z */) ||
+      (ch >= 0x61 /* a */ && ch <= 0x7A /* z */)
+    )
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-RegExpUnicodeEscapeSequence
+  public function fnregexp_eatRegExpUnicodeEscapeSequence = function(state) {
+    const start = state.pos
+
+    if ($oState->fnEat(0x75 /* u */)) {
+      if ($this->regexp_eatFixedHexDigits(state, 4)) {
+        const lead = $oState->iLastIntValue
+        if (state.switchU && lead >= 0xD800 && lead <= 0xDBFF) {
+          const leadSurrogateEnd = state.pos
+          if ($oState->fnEat(0x5C /* \ */) && $oState->fnEat(0x75 /* u */) && $this->regexp_eatFixedHexDigits(state, 4)) {
+            const trail = $oState->iLastIntValue
+            if (trail >= 0xDC00 && trail <= 0xDFFF) {
+              $oState->iLastIntValue = (lead - 0xD800) * 0x400 + (trail - 0xDC00) + 0x10000
+              return true
+            }
+          }
+          state.pos = leadSurrogateEnd
+          $oState->iLastIntValue = lead
+        }
+        return true
+      }
+      if (
+        state.switchU &&
+        $oState->fnEat(0x7B /* { */) &&
+        $this->regexp_eatHexDigits(state) &&
+        $oState->fnEat(0x7D /* } */) &&
+        isValidUnicode($oState->iLastIntValue)
+      ) {
+        return true
+      }
+      if (state.switchU) {
+        $oState->fnRaise("Invalid unicode escape")
+      }
+      state.pos = start
+    }
+
+    return false
+  }
+  function isValidUnicode(ch) {
+    return ch >= 0 && ch <= 0x10FFFF
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-annexB-IdentityEscape
+  public function fnregexp_eatIdentityEscape = function(state) {
+    if (state.switchU) {
+      if ($this->regexp_eatSyntaxCharacter(state)) {
+        return true
+      }
+      if ($oState->fnEat(0x2F /* / */)) {
+        $oState->iLastIntValue = 0x2F /* / */
+        return true
+      }
+      return false
+    }
+
+    const ch = state.current()
+    if (ch !== 0x63 /* c */ && (!state.switchN || ch !== 0x6B /* k */)) {
+      $oState->iLastIntValue = ch
+      state.advance()
+      return true
+    }
+
+    return false
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-DecimalEscape
+  public function fnregexp_eatDecimalEscape = function(state) {
+    $oState->iLastIntValue = 0
+    let ch = state.current()
+    if (ch >= 0x31 /* 1 */ && ch <= 0x39 /* 9 */) {
+      do {
+        $oState->iLastIntValue = 10 * $oState->iLastIntValue + (ch - 0x30 /* 0 */)
+        state.advance()
+      } while ((ch = state.current()) >= 0x30 /* 0 */ && ch <= 0x39 /* 9 */)
+      return true
+    }
+    return false
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-CharacterClassEscape
+  public function fnregexp_eatCharacterClassEscape = function(state) {
+    const ch = state.current()
+
+    if (isCharacterClassEscape(ch)) {
+      $oState->iLastIntValue = -1
+      state.advance()
+      return true
+    }
+
+    if (
+      state.switchU &&
+      $this->options.ecmaVersion >= 9 &&
+      (ch === 0x50 /* P */ || ch === 0x70 /* p */)
+    ) {
+      $oState->iLastIntValue = -1
+      state.advance()
+      if (
+        $oState->fnEat(0x7B /* { */) &&
+        $this->regexp_eatUnicodePropertyValueExpression(state) &&
+        $oState->fnEat(0x7D /* } */)
+      ) {
+        return true
+      }
+      $oState->fnRaise("Invalid property name")
+    }
+
+    return false
+  }
+  function isCharacterClassEscape(ch) {
+    return (
+      ch === 0x64 /* d */ ||
+      ch === 0x44 /* D */ ||
+      ch === 0x73 /* s */ ||
+      ch === 0x53 /* S */ ||
+      ch === 0x77 /* w */ ||
+      ch === 0x57 /* W */
+    )
+  }
+
+  // UnicodePropertyValueExpression ::
+  //   UnicodePropertyName `=` UnicodePropertyValue
+  //   LoneUnicodePropertyNameOrValue
+  public function fnregexp_eatUnicodePropertyValueExpression = function(state) {
+    const start = state.pos
+
+    // UnicodePropertyName `=` UnicodePropertyValue
+    if ($this->regexp_eatUnicodePropertyName(state) && $oState->fnEat(0x3D /* = */)) {
+      const name = $oState->sLastStringValue
+      if ($this->regexp_eatUnicodePropertyValue(state)) {
+        const value = $oState->sLastStringValue
+        $this->regexp_validateUnicodePropertyNameAndValue(state, name, value)
+        return true
+      }
+    }
+    state.pos = start
+
+    // LoneUnicodePropertyNameOrValue
+    if ($this->regexp_eatLoneUnicodePropertyNameOrValue(state)) {
+      const nameOrValue = $oState->sLastStringValue
+      $this->regexp_validateUnicodePropertyNameOrValue(state, nameOrValue)
+      return true
+    }
+    return false
+  }
+  public function fnregexp_validateUnicodePropertyNameAndValue = function(state, name, value) {
+    if (!UNICODE_PROPERTY_VALUES.hasOwnProperty(name) || UNICODE_PROPERTY_VALUES[name].indexOf(value) === -1) {
+      $oState->fnRaise("Invalid property name")
+    }
+  }
+  public function fnregexp_validateUnicodePropertyNameOrValue = function(state, nameOrValue) {
+    if (UNICODE_PROPERTY_VALUES.$LONE.indexOf(nameOrValue) === -1) {
+      $oState->fnRaise("Invalid property name")
+    }
+  }
+
+  // UnicodePropertyName ::
+  //   UnicodePropertyNameCharacters
+  public function fnregexp_eatUnicodePropertyName = function(state) {
+    let ch = 0
+    $oState->sLastStringValue = ""
+    while (isUnicodePropertyNameCharacter(ch = state.current())) {
+      $oState->sLastStringValue += codePointToString(ch)
+      state.advance()
+    }
+    return $oState->sLastStringValue !== ""
+  }
+  function isUnicodePropertyNameCharacter(ch) {
+    return isControlLetter(ch) || ch === 0x5F /* _ */
+  }
+
+  // UnicodePropertyValue ::
+  //   UnicodePropertyValueCharacters
+  public function fnregexp_eatUnicodePropertyValue = function(state) {
+    let ch = 0
+    $oState->sLastStringValue = ""
+    while (isUnicodePropertyValueCharacter(ch = state.current())) {
+      $oState->sLastStringValue += codePointToString(ch)
+      state.advance()
+    }
+    return $oState->sLastStringValue !== ""
+  }
+  function isUnicodePropertyValueCharacter(ch) {
+    return isUnicodePropertyNameCharacter(ch) || isDecimalDigit(ch)
+  }
+
+  // LoneUnicodePropertyNameOrValue ::
+  //   UnicodePropertyValueCharacters
+  public function fnregexp_eatLoneUnicodePropertyNameOrValue = function(state) {
+    return $this->regexp_eatUnicodePropertyValue(state)
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-CharacterClass
+  public function fnregexp_eatCharacterClass = function(state) {
+    if ($oState->fnEat(0x5B /* [ */)) {
+      $oState->fnEat(0x5E /* ^ */)
+      $this->regexp_classRanges(state)
+      if ($oState->fnEat(0x5D /* [ */)) {
+        return true
+      }
+      // Unreachable since it threw "unterminated regular expression" error before.
+      $oState->fnRaise("Unterminated character class")
+    }
+    return false
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-ClassRanges
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-NonemptyClassRanges
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-NonemptyClassRangesNoDash
+  public function fnregexp_classRanges = function(state) {
+    while ($this->regexp_eatClassAtom(state)) {
+      const left = $oState->iLastIntValue
+      if ($oState->fnEat(0x2D /* - */) && $this->regexp_eatClassAtom(state)) {
+        const right = $oState->iLastIntValue
+        if (state.switchU && (left === -1 || right === -1)) {
+          $oState->fnRaise("Invalid character class")
+        }
+        if (left !== -1 && right !== -1 && left > right) {
+          $oState->fnRaise("Range out of order in character class")
+        }
+      }
+    }
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-ClassAtom
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-ClassAtomNoDash
+  public function fnregexp_eatClassAtom = function(state) {
+    const start = state.pos
+
+    if ($oState->fnEat(0x5C /* \ */)) {
+      if ($this->regexp_eatClassEscape(state)) {
+        return true
+      }
+      if (state.switchU) {
+        // Make the same message as V8.
+        const ch = state.current()
+        if (ch === 0x63 /* c */ || isOctalDigit(ch)) {
+          $oState->fnRaise("Invalid class escape")
+        }
+        $oState->fnRaise("Invalid escape")
+      }
+      state.pos = start
+    }
+
+    const ch = state.current()
+    if (ch !== 0x5D /* [ */) {
+      $oState->iLastIntValue = ch
+      state.advance()
+      return true
+    }
+
+    return false
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-annexB-ClassEscape
+  public function fnregexp_eatClassEscape = function(state) {
+    const start = state.pos
+
+    if ($oState->fnEat(0x62 /* b */)) {
+      $oState->iLastIntValue = 0x08 /* <BS> */
+      return true
+    }
+
+    if (state.switchU && $oState->fnEat(0x2D /* - */)) {
+      $oState->iLastIntValue = 0x2D /* - */
+      return true
+    }
+
+    if (!state.switchU && $oState->fnEat(0x63 /* c */)) {
+      if ($this->regexp_eatClassControlLetter(state)) {
+        return true
+      }
+      state.pos = start
+    }
+
+    return (
+      $this->fnRegexp_eatCharacterClassEscape(state) ||
+      $this->fnRegexp_eatCharacterEscape(state)
+    )
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-annexB-ClassControlLetter
+  public function fnregexp_eatClassControlLetter = function(state) {
+    const ch = state.current()
+    if (isDecimalDigit(ch) || ch === 0x5F /* _ */) {
+      $oState->iLastIntValue = ch % 0x20
+      state.advance()
+      return true
+    }
+    return false
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-HexEscapeSequence
+  public function fnregexp_eatHexEscapeSequence = function(state) {
+    const start = state.pos
+    if ($oState->fnEat(0x78 /* x */)) {
+      if ($this->regexp_eatFixedHexDigits(state, 2)) {
+        return true
+      }
+      if (state.switchU) {
+        $oState->fnRaise("Invalid escape")
+      }
+      state.pos = start
+    }
+    return false
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-DecimalDigits
+  public function fnregexp_eatDecimalDigits = function(state) {
+    const start = state.pos
+    let ch = 0
+    $oState->iLastIntValue = 0
+    while (isDecimalDigit(ch = state.current())) {
+      $oState->iLastIntValue = 10 * $oState->iLastIntValue + (ch - 0x30 /* 0 */)
+      state.advance()
+    }
+    return state.pos !== start
+  }
+  function isDecimalDigit(ch) {
+    return ch >= 0x30 /* 0 */ && ch <= 0x39 /* 9 */
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-HexDigits
+  public function fnregexp_eatHexDigits = function(state) {
+    const start = state.pos
+    let ch = 0
+    $oState->iLastIntValue = 0
+    while (isHexDigit(ch = state.current())) {
+      $oState->iLastIntValue = 16 * $oState->iLastIntValue + hexToInt(ch)
+      state.advance()
+    }
+    return state.pos !== start
+  }
+  function isHexDigit(ch) {
+    return (
+      (ch >= 0x30 /* 0 */ && ch <= 0x39 /* 9 */) ||
+      (ch >= 0x41 /* A */ && ch <= 0x46 /* F */) ||
+      (ch >= 0x61 /* a */ && ch <= 0x66 /* f */)
+    )
+  }
+  function hexToInt(ch) {
+    if (ch >= 0x41 /* A */ && ch <= 0x46 /* F */) {
+      return 10 + (ch - 0x41 /* A */)
+    }
+    if (ch >= 0x61 /* a */ && ch <= 0x66 /* f */) {
+      return 10 + (ch - 0x61 /* a */)
+    }
+    return ch - 0x30 /* 0 */
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-annexB-LegacyOctalEscapeSequence
+  // Allows only 0-377(octal) i.e. 0-255(decimal).
+  public function fnregexp_eatLegacyOctalEscapeSequence = function(state) {
+    if ($this->regexp_eatOctalDigit(state)) {
+      const n1 = $oState->iLastIntValue
+      if ($this->regexp_eatOctalDigit(state)) {
+        const n2 = $oState->iLastIntValue
+        if (n1 <= 3 && $this->regexp_eatOctalDigit(state)) {
+          $oState->iLastIntValue = n1 * 64 + n2 * 8 + $oState->iLastIntValue
+        } else {
+          $oState->iLastIntValue = n1 * 8 + n2
+        }
+      } else {
+        $oState->iLastIntValue = n1
+      }
+      return true
+    }
+    return false
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-OctalDigit
+  public function fnregexp_eatOctalDigit = function(state) {
+    const ch = state.current()
+    if (isOctalDigit(ch)) {
+      $oState->iLastIntValue = ch - 0x30 /* 0 */
+      state.advance()
+      return true
+    }
+    $oState->iLastIntValue = 0
+    return false
+  }
+  function isOctalDigit(ch) {
+    return ch >= 0x30 /* 0 */ && ch <= 0x37 /* 7 */
+  }
+
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-Hex4Digits
+  // https://www.ecma-international.org/ecma-262/8.0/#prod-HexDigit
+  // And HexDigit HexDigit in https://www.ecma-international.org/ecma-262/8.0/#prod-HexEscapeSequence
+  public function fnregexp_eatFixedHexDigits = function(state, length) {
+    const start = state.pos
+    $oState->iLastIntValue = 0
+    for (let i = 0; i < length; ++i) {
+      const ch = state.current()
+      if (!isHexDigit(ch)) {
+        state.pos = start
+        return false
+      }
+      $oState->iLastIntValue = 16 * $oState->iLastIntValue + hexToInt(ch)
+      state.advance()
+    }
+    return true
+  }  
+  
   public function fnParseI()
   {
     $oNode = !empty($this->aOptions['program']) ? $this->aOptions['program'] : $this->fnStartNode();

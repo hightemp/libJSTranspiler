@@ -39,50 +39,53 @@ class Utilities
     '\\' => '\\\\'
   ];
   
-  public static function toHex(code, prefix) {
-    var hex = code.toString(16).toUpperCase();
-    if (hex.length === 1) {
-      hex = '0' + hex;
+  public static function fnToHex($iCode, $sPrefix) 
+  {
+    $sHex = strtoupper(bin2hex($iCode));
+    if (strlen($sHex)==1) {
+      $sHex = '0' . $sHex;
     }
-    if (prefix) {
-      hex = prefix + hex;
+    if ($sPrefix) {
+      $sHex = $sPrefix . $sHex;
     }
-    return hex;
+    return $sHex;
   }
 
-  public static function toOctet(codePoint, shift, prefix) {
-    return toHex(((codePoint >> shift) & 0x3F) | 0x80, prefix);
+  public static function fnToOctet($iCodePoint, $iShift, $sPrefix) 
+  {
+    return self::fnToHex((($iCodePoint >> $iShift) & 0x3F) | 0x80, $sPrefix);
   }
 
   //encode unicode character to a set of escaped octets like \xC2\xA9
-  public static function encodeChar(ch, prefix) {
-    var code = ch.charCodeAt(0);
-    if ((code & 0xFFFFFF80) == 0) { // 1-byte sequence
-      return toHex(code, prefix);
+  public static function fnEncodeChar($sCh, $sPrefix) 
+  {
+    $iCode = self::fnUniord($sCh);
+    if (($iCode & 0xFFFFFF80) == 0) { // 1-byte sequence
+      return self::fnToHex($iCode, $sPrefix);
     }
-    var result = '';
-    if ((code & 0xFFFFF800) == 0) { // 2-byte sequence
-      result = toHex(((code >> 6) & 0x1F) | 0xC0, prefix);
+    $sResult = '';
+    if (($iCode & 0xFFFFF800) == 0) { // 2-byte sequence
+      $sResult = self::fnToHex((($iCode >> 6) & 0x1F) | 0xC0, $sPrefix);
     }
-    else if ((code & 0xFFFF0000) == 0) { // 3-byte sequence
-      result = toHex(((code >> 12) & 0x0F) | 0xE0, prefix);
-      result += toOctet(code, 6, prefix);
+    else if (($iCode & 0xFFFF0000) == 0) { // 3-byte sequence
+      $sResult = self::fnToHex((($iCode >> 12) & 0x0F) | 0xE0, $sPrefix);
+      $sResult .= self::fnToOctet($iCode, 6, $sPrefix);
     }
-    else if ((code & 0xFFE00000) == 0) { // 4-byte sequence
-      result = toHex(((code >> 18) & 0x07) | 0xF0, prefix);
-      result += toOctet(code, 12, prefix);
-      result += toOctet(code, 6, prefix);
+    else if (($iCode & 0xFFE00000) == 0) { // 4-byte sequence
+      $sResult = self::fnToHex((($iCode >> 18) & 0x07) | 0xF0, $sPrefix);
+      $sResult .= self::fnToOctet($iCode, 12, $sPrefix);
+      $sResult .= self::fnToOctet($iCode, 6, $sPrefix);
     }
-    result += toHex((code & 0x3F) | 0x80, prefix);
-    return result;
+    $sResult .= self::fnToHex(($iCode & 0x3F) | 0x80, $sPrefix);
+    return $sResult;
   }
   
   public static function fnEcodeString($sString) 
   {
     $sString = preg_replace_callback(
-      "/[\\\"\$\x00-\x1F\x{007F}-\x{FFFF}/", 
+      "/[\\\"\$\x{00}-\x{1F}\x{007F}-\x{FFFF}]/u", 
       function ($sCh) {
-        return (isset(self::ESC_CHARS[$sCh])) ? self::ESC_CHARS[$sCh] : self::fnEncodeChar($sCh, '\\x');
+        return (Utilities::ESC_CHARS[$sCh]) ? Utilities::ESC_CHARS[$sCh] : Utilities::fnEncodeChar($sCh, '\\x');
       },
       $sString
     );
