@@ -3872,14 +3872,6 @@ class Parser
     return ($this->fnCurrentVarScope()->iFlags & Scope::SCOPE_ASYNC) > 0;
   }
 
-  public function fnCodePointToString($iCh) 
-  {
-    if ($iCh <= 0xFFFF) 
-      return Utilities::fnUnichr($iCh);
-    $iCh -= 0x10000;
-    return Utilities::fnUnichr(($iCh >> 10) + 0xD800, ($iCh & 0x03FF) + 0xDC00);
-  }
-
   /**
    * Validate the flags part of a given RegExpLiteral.
    *
