@@ -41,8 +41,6 @@ class Node
   public $bStatic;
   public $oKey;
   public $bComputed;
-  public $sValue;
-  public $oValue;
   public $mValue;
   public $bSuperClass;
   public $oSource;
@@ -70,6 +68,10 @@ class Node
   public $oMeta;
   public $bTail;
   public $aParams;
+  public $rParent;
+  public $sAppendSuffix;
+  public $aTerms;
+  public $bIsConcat;
   
   public function __construct($oParser, $iPos, $oLoc)
   {

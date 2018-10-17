@@ -109,6 +109,59 @@ class Transpiler
     '>>>'
   ];
   
+  const GLOBALS = [
+    'Array', 
+    'Boolean', 
+    'Buffer', 
+    'Date', 
+    'Error', 
+    'RangeError', 
+    'ReferenceError', 
+    'SyntaxError', 
+    'TypeError', 
+    'Function', 
+    'Infinity', 
+    'JSON', 
+    'Math', 
+    'NaN', 
+    'Number', 
+    'Object', 
+    'RegExp', 
+    'String', 
+    'console', 
+    'decodeURI', 
+    'decodeURIComponent', 
+    'encodeURI', 
+    'encodeURIComponent', 
+    'escape', 
+    'eval', 
+    'isFinite', 
+    'isNaN', 
+    'parseFloat', 
+    'parseInt', 
+    'undefined', 
+    'unescape'
+  ];
+
+  const SCOPE_TYPES = [
+    'FunctionDeclaration', 
+    'FunctionExpression', 
+    'Program'
+  ];
+
+  //these have special meaning in PHP so we escape variables with these names
+  const SUPER_GLOBALS = [
+    'GLOBALS', 
+    '_SERVER', 
+    '_GET', 
+    '_POST', 
+    '_FILES', 
+    '_COOKIE', 
+    '_SESSION', 
+    '_REQUEST', 
+    '_ENV'
+  ];
+  
   public $aOpts;
   
   public function __construct($aOpts=[])
@@ -116,10 +169,29 @@ class Transpiler
     $this->aOpts = $aOpts;
   }
 
-  public function fnBody($oNode, &$oParent) 
+  public function toBlock($oNode) 
   {
-    $aOpts = $this->aOpts;
-    $oScopeNode = ($oNode->sType === 'BlockStatement') ? $oParent : $oNode;
+    $aOpts = &$this->aOpts;
+    if ($oNode->sType === 'BlockStatement') {
+      return $this->fnBody($oNode);
+    }
+    
+    $aOpts['indentLevel'] += 1;
+    
+    $sResult = $this->fnGenerate($oNode);
+    if ($sResult) {
+      $sResult = $this->fnIndent() . $sResult;
+    }
+    
+    $aOpts['indentLevel'] -= 1;
+    
+    return $sResult;
+  }
+  
+  public function fnBody($oNode) 
+  {
+    $aOpts = &$this->aOpts;
+    $oScopeNode = ($oNode->sType === 'BlockStatement') ? $oNode->rParent : $oNode;
     $oScopeIndex = $oScopeNode->oScopeIndex;
     $aResults = [];
     
@@ -163,6 +235,491 @@ class Transpiler
       $aOpts['indentLevel'] -= 1;
     }
     return join('', $aResults);
+  }
+
+  public function fnBlockStatement($oNode) 
+  {
+    $aResults = ['{\n'];
+    array_push($aResults, $this->fnBody($oNode));
+    array_push($aResults, $this->fnIndent() . '}');
+    return join('', $aResults) . '\n';
+  }
+
+  public function fnVariableDeclaration($oNode) 
+  {
+    $aResults = [];
+    foreach ($oNode->aDeclarations as $oDNode) {
+      if ($oDNode->oInit) {
+        array_push($aResults, $this->fnEncodeVar($oDNode->oId) . ' = ' . $this->fnGenerate($oDNode->oInit));
+      }
+    }
+    if (!count($aResults)) {
+      return '';
+    }
+    if ($oNode->rParent->sType === 'ForStatement') { //?
+      return join(', ', $aResults);
+    }
+    return join('; ', $aResults) . ';\n';
+  }
+
+  public function fnIfStatement($oNode) 
+  {
+    $aResults = ['if ('];
+    array_push($aResults, $this->fnTruthyWrap($oNode->oTest));
+    array_push($aResults, ') {\n');
+    array_push($aResults, $this->fnToBlock($oNode->oConsequent));
+    array_push($aResults, $this->fnIndent() . '}');
+    if ($oNode->oAlternate) {
+      array_push($aResults, ' else ');
+      if ($oNode->oAlternate->sType === 'IfStatement') {
+        array_push($aResults, $this->fnGenerate($oNode->oAlternate));
+      } else {
+        array_push($aResults, '{\n');
+        array_push($aResults, $this->fnToBlock($oNode->oAlternate));
+        array_push($aResults, $this->fnIndent() . '}\n');
+      }
+    }
+    return join('', $aResults) . '\n';
+  }
+
+  public function fnSwitchStatement($oNode) 
+  {
+    $aOpts = &$this->aOpts;
+    $aResults = ['switch ('];
+    array_push($aResults, $this->fnGenerate($oNode->oDiscriminant));
+    array_push($aResults, ') {\n');
+    
+    $aOpts['indentLevel'] += 1;
+    
+    foreach ($oNode->aCases as $oCNode) {
+      array_push($aResults, $this->fnIndent());
+      if ($oCNode->oTest === null) {
+        array_push($aResults, 'default:\n');
+      } else {
+        array_push($aResults, 'case ' . $this->fnGenerate($oCNode->oTest) . ':\n');
+      }
+      
+      $aOpts['indentLevel'] += 1;
+      
+      foreach ($oNode->oConsequent as $oConsequentNode) {
+        array_push($aResults, $this->fnIndent() . $this->fnGenerate($oConsequentNode));
+      }
+      
+      $aOpts['indentLevel'] -= 1;
+    }
+    
+    $aOpts['indentLevel'] -= 1;
+    
+    array_push($aResults, $this->fnIndent() . '}');
+    return join('', $aResults) . '\n';
+  }
+
+  public function fnConditionalExpression($oNode) 
+  {
+    //PHP has "non-obvious" ternary operator precedence according to the docs
+    // these are safe: Literal, Identifier, ThisExpression,
+    // FunctionExpression, CallExpression, MemberExpression, NewExpression,
+    // ArrayExpression, ObjectExpression, SequenceExpression, UnaryExpression
+    $sAlternate = $this->fnGenerate($oNode->oAlternate);
+    switch ($oNode->oAlternate->sType) {
+      case 'AssignmentExpression':
+      case 'BinaryExpression':
+      case 'LogicalExpression':
+      case 'UpdateExpression':
+      case 'ConditionalExpression':
+        $sAlternate = '(' . $sAlternate . ')';
+        break;
+    }
+    return $this->fnTruthyWrap($oNode->oTest) . ' ? ' . $this->fnGenerate($oNode->oConsequent) . ' : ' . $sAlternate;
+  }
+
+  public function fnForStatement($oNode) 
+  {
+    $aResults = ['for ('];
+    array_push($aResults, $this->fnGenerate($oNode->oInit) . '; ');
+    array_push($aResults, $this->fnTruthyWrap($oNode->oTest) . '; ');
+    array_push($aResults, $this->fnGenerate($oNode->oUpdate));
+    array_push($aResults, ') {\n');
+    array_push($aResults, $this->fnToBlock($oNode->aBody));
+    array_push($aResults, $this->fnIndent() . '}');
+    return join('', $aResults) . '\n';
+  }
+
+  public function fnForInStatement($oNode) 
+  {
+    $aResults = [];
+    $oIdentifier;
+    if ($oNode->oLeft->sType === 'VariableDeclaration') {
+      $oIdentifier = $oNode->oLeft->aDeclarations[0]->oId;
+    } else
+    if ($oNode->oLeft->sType === 'Identifier') {
+      $oIdentifier = $oNode->oLeft;
+    } else {
+      throw new Exception('Unknown left part of for..in `' . $oNode->oLeft->sType . '`');
+    }
+    array_push($aResults, 'foreach (keys(');
+    array_push($aResults, $this->fnGenerate($oNode->oRight) . ') as ' . $this->fnEncodeVar($oIdentifier) . ') {\n');
+    array_push($aResults, $this->fnToBlock($oNode->aBody));
+    array_push($aResults, $this->fnIndent() . '}');
+    return join('', $aResults) . '\n';
+  }
+
+  public function fnWhileStatement($oNode) 
+  {
+    $aResults = ['while ('];
+    array_push($aResults, $this->fnTruthyWrap($oNode->oTest));
+    array_push($aResults, ') {\n');
+    array_push($aResults, $this->fnToBlock($oNode->aBody));
+    array_push($aResults, $this->fnIndent() . '}');
+    return join('', $aResults) . '\n';
+  }
+
+  public function fnDoWhileStatement($oNode) 
+  {
+    $aResults = ['do {\n'];
+    array_push($aResults, $this->fnToBlock($oNode->aBody));
+    array_push($aResults, $this->fnIndent() . '} while (' . $this->fnTruthyWrap($oNode->oTest) . ');');
+    return join('', $aResults) . '\n';
+  }
+
+  public function fnTryStatement($oNode) 
+  {
+    $oCatchClause = $oNode->aHandlers[0]; //?
+    $oParam = $oCatchClause->oParam;
+    $aResults = ['try {\n'];
+    array_push($aResults, $this->fnBody($oNode->oBlock));
+    array_push($aResults, $this->fnIndent() . '} catch(Exception ' . $this->fnEncodeVar($oParam) . ') {\n');
+    array_push($aResults, $this->fnIndent(1) . 'if (' . $this->fnEncodeVar($oParam) . ' instanceof Ex) ' . $this->fnEncodeVar($oParam) . ' = ' . $this->fnEncodeVar($oParam) . '->value;\n');
+    array_push($aResults, $this->fnBody($oCatchClause->aBody));
+    array_push($aResults, $this->fnIndent() . '}');
+    return join('', $aResults) . '\n';
+  }
+
+  public function fnThrowStatement($oNode) 
+  {
+    return 'throw new Ex(' . $this->fnGenerate($oNode->oArgument) . ');\n';
+  }
+
+  public function fnFunctionExpression($oNode) 
+  {
+    $aMeta = [];
+    $aOpts = &$this->aOpts;
+    $bParentIsStrict = $aOpts['isStrict'];
+    $aOpts['isStrict'] = $bParentIsStrict || $this->fnIsStrictDirective($oNode->aBody->aBody[0]);
+    if ($oNode->bUseStrict === false) { //?
+      $aOpts['isStrict'] = false;
+    }
+    if ($aOpts['isStrict']) {
+      array_push($aMeta, '"strict" => true');
+    }
+    $aResults = ['new Func('];
+    if ($oNode->oId) {
+      array_push($aResults, $this->fnEncodeString($oNode->oId->sName) . ', ');
+    }
+    $aParams = [];
+    foreach ($oNode->aParams as $sParam) {
+      $aParams[] = $this->fnEncodeVar($sParam) . ' = null';
+    }
+    $aScopeIndex = $oNode->aScopeIndex; //?
+    $sFunctionName = $oNode->oId ? $oNode->oId->sName : '';
+    if ($aScopeIndex['unresolved'][$sFunctionName]) {
+      unset($aScopeIndex['unresolved'][$sFunctionName]);
+    }
+    $aUnresolvedRefs = [];
+    foreach (array_keys($aScopeIndex['unresolved']) as $sName) {
+      $aUnresolvedRefs[] = $this->fnEncodeVarName(name);
+    }
+    $sUseClause = count($aUnresolvedRefs) ? 'use (&' . join(', &', $aUnresolvedRefs) . ') ' : '';
+    array_push($aResults, 'function(' . join(', ', $aParams) . ') ' . $sUseClause . '{\n');
+    if ($aScopeIndex['referenced'][$sFunctionName]) {
+      array_push($aResults, $this->fnIndent(1) . $this->fnEncodeVarName($sFunctionName) . ' = Func::getCurrent();\n');
+    }
+    array_push($aResults, $this->fnBody($oNode->aBody));
+    array_push($aResults, $this->fnIndent() . '}');
+    if (count($aMeta)) {
+      array_push($aResults, ', array(' . join(', ', $aMeta) . ')');
+    }
+    array_push($aResults, ')');
+    $aOpts['isStrict'] = $bParentIsStrict;
+    return join('', $aResults);
+  }
+
+  public function fnArrayExpression($oNode) 
+  {
+    $aItems = [];
+    foreach ($oNode->aElements as $oEl) {
+      $aItems[] = ($oEl === null) ? 'Arr::$empty' : $this->fnGenerate($oEl);
+    }
+    return 'new Arr(' . join(', ', $aItems) . ')';
+  }
+
+  public function fnObjectExpression($oNode) 
+  {
+    $aItems = [];
+    foreach ($oNode->aProperties as $oPNode) {
+      $oKey = $oPNode->oKey;
+      //key can be a literal or an identifier (quoted or not)
+      $sKeyName = ($oKey->sType === 'Identifier') ? $oKey->sName : $oKey->mValue;
+      array_push($aItems, $this->fnEncodeString($sKeyName));
+      array_push($aItems, $this->fnGenerate($oNode->mValue));
+    }
+    return 'new Object(' . join(', ', $aItems) . ')';
+  }
+
+  public function fnCallExpression($oNode) 
+  {
+    $aArgs = [];
+    foreach ($oNode->aArguments as $oArg) {
+      $aArgs[] = $this->fnGenerate($oArg);
+    }
+    if ($oNode->oCallee->sType === 'MemberExpression') {
+      return 'call_method(' . 
+        $this->fnGenerate($oNode->oCallee->oObject) . ', ' . 
+        $this->fnEncodeProp($oNode->oCallee) . 
+        (count($aArgs) ? ', ' . join(', ', $aArgs) : '') . ')';
+    } else {
+      return 'call(' . $this->fnGenerate($oNode->oCallee) . 
+        (count($aArgs) ? ', ' . join(', ', $aArgs) : '') . ')';
+    }
+  }
+
+  public function fnMemberExpression($oNode) 
+  {
+    return 'get(' . $this->fnGenerate($oNode->oObject) . ', ' . $this->fnEncodeProp($oNode) . ')';
+  }
+
+  public function fnNewExpression($oNode) 
+  {
+    $aArgs = [];
+    foreach ($oNode->aArguments as $oArg) {
+      $aArgs[] = $this->fnGenerate($oArg);
+    }
+    return '_new(' . $this->fnGenerate($oNode->oCallee) . (count($aArgs) ? ', ' . join(', ', $aArgs) : '') . ')';
+  }
+
+  public function fnAssignmentExpression($oNode) 
+  {
+    if ($oNode->oLeft->sType === 'MemberExpression') {
+      //`a.b = 1` -> `set(a, "b", 1)` but `a.b += 1` -> `set(a, "b", 1, "+=")`
+      if ($oNode.sOperator === '=') {
+        return 'set(' . $this->fnGenerate($oNode->oLeft->oObject) . ', ' . $this->fnEncodeProp($oNode->oLeft) . ', ' . $this->fnGenerate($oNode->oRight) . ')';
+      } else {
+        return 'set(' . $this->fnGenerate($oNode->oLeft->oObject) . ', ' . $this->fnEncodeProp($oNode->oLeft) . ', ' . $this->fnGenerate($oNode->oRight) . ', "' . $oNode->sOperator . '")';
+      }
+    }
+    if (in_array($oNode->oLeft->sName, self::GLOBALS)) {
+      $oScope = $this->fnGetParentScope($oNode); //?
+      if ($oScope->sType === 'Program') {
+        $oNode->oLeft->sAppendSuffix = '_';
+      }
+    }
+    //special case += since plus can be either add or concatenate
+    if ($oNode->sOperator === '+=') {
+      $sIdent = $this->fnGenerate($oNode->oLeft);
+      return $sIdent . ' = _plus(' . $sIdent . ', ' . $this->fnGenerate($oNode->oRight) . ')';
+    }
+    return $this->fnEncodeVar($oNode->oLeft) . ' ' . $oNode.sOperator . ' ' . $this->fnGenerate($oNode->oRight);
+  }
+
+  public function fnUpdateExpression($oNode) 
+  {
+    if ($oNode->oArgument->sType === 'MemberExpression') {
+      //convert `++a` to `a += 1`
+      $sOperator = ($oNode->sOperator === '++') ? '+=' : '-=';
+      // ++i returns the new (updated) value; i++ returns the old value
+      $bReturnOld = $oNode->bPrefix ? false : true;
+      return 'set(' . $this->fnGenerate($oNode->oArgument->oObject) . ', ' . 
+             $this->fnEncodeProp($oNode->oArgument) . ', 1, "' . 
+             $sOperator . '", ' . $bReturnOld . ')';
+    }
+    //special case (i++ and ++i) assume type is number
+    if ($oNode->bPrefix) {
+      return $oNode->sOperator . $this->fnGenerate($oNode->oArgument);
+    } else {
+      return $this->fnGenerate($oNode->oArgument) . $oNode->sOperator;
+    }
+  }
+
+  public function fnLogicalExpression($oNode) 
+  {
+    $sOp = $oNode->sOperator;
+    if ($this->fnIsBooleanExpr($oNode)) {
+      $sResult = $this->fnGenerate($oNode->oLeft) . ' ' . $sOp . ' ' . $this->fnGenerate($oNode->oRight);
+      if ($this->fnOpPrecedence($sOp) < $this->fnOpPrecedence($oNode->rParent->sOperator)) {
+        $sResult = '(' . result . ')';
+      }
+      return $sResult;
+    }
+    if ($sOp === '&&') {
+      return $this->fnGenAnd($oNode);
+    }
+    if ($sOp === '||') {
+      return $this->fnGenOr($oNode);
+    }
+  }
+
+  public function fnGenAnd($oNode) 
+  {
+    $aOpts = &$this->aOpts;
+    $aOpts['andDepth'] = ($aOpts['andDepth'] == null) ? 0 : $aOpts['andDepth'] + 1;
+    $sName = ($aOpts['andDepth'] === 0) ? '$and_' : '$and' . $aOpts['andDepth'] . '_';
+    $sTest = '(' . $sName . ' = ' . $this->fnGenerate($oNode->oLeft) . ')';
+    if (!$this->fnIsBooleanExpr($oNode->oLeft)) {
+      $sTest = 'is' . $sTest;
+    }
+    $sResult = '(' . $sTest . ' ? ' . $this->fnGenerate($oNode->oRight) . ' : ' . $sName . ')';
+    $aOpts['andDepth'] = ($aOpts['andDepth'] === 0) ? null : $aOpts['andDepth'] - 1;
+    return $sResult;
+  }
+
+  public function fnGenOr($oNode) 
+  {
+    $aOpts = &$this->aOpts;
+    $aOpts['orDepth'] = ($aOpts['orDepth'] == null) ? 0 : $aOpts['orDepth'] + 1;
+    $sName = ($aOpts['orDepth'] === 0) ? '$or_' : '$or' + $aOpts['orDepth'] + '_';
+    $sTest = '(' . $sName . ' = ' . $this->fnGenerate($oNode->oLeft) . ')';
+    if (!$this->fnIsBooleanExpr($oNode->oLeft)) {
+      $sTest = 'is' . $sTest;
+    }
+    $sResult = '(' . $sTest . ' ? ' . $sName . ' : ' . $this->fnGenerate($oNode->oRight) . ')';
+    $aOpts['orDepth'] = ($aOpts['orDepth'] === 0) ? null : $aOpts['orDepth'] - 1;
+    return $sResult;
+  }
+
+  public function fnBinaryExpression($oNode) 
+  {
+    $sOp = $oNode->sOperator;
+    if ($sOp === '+') {
+      $aTerms = [];
+      foreach ($oNode->aTerms as $oValue) {
+        $aTerms[] = $this->fnGenerate($oValue);
+      }
+      if ($oNode->bIsConcat) {
+        return '_concat(' . join(', ', $aTerms) . ')';
+      } else {
+        return '_plus(' . join(', ', $aTerms) . ')';
+      }
+    }
+    if ($sOp === '==') {
+      return 'eq(' . $this->fnGenerate($oNode->oLeft) . ', ' . $this->fnGenerate($oNode->oRight) . ')';
+    }
+    if ($sOp === '!=') {
+      return '!eq(' . $this->fnGenerate($oNode->oLeft) . ', ' . $this->fnGenerate($oNode->oRight) . ')';
+    }
+    
+    $bCastFloat = false;
+    // some ops will return int in which case we need to cast result
+    if ($sOp === '%') {
+      $bCastFloat = true;
+    }
+    $bToNumber = false;
+    if (in_array($sOp, self::BINARY_NUM_OPS)) {
+      $sOp = self::BINARY_NUM_OPS[$sOp];
+      $bToNumber = true;
+    } else
+      if ($this->fnIsWord($sOp)) {
+        //in, instanceof
+        $sOp = '_' . $sOp;
+      }
+    $sLeftExpr = $this->fnGenerate($oNode->oLeft);
+    $sRightExpr = $this->fnGenerate($oNode->oRight);
+    if ($this->fnIsWord($sOp)) {
+      return $sOp . '(' . $sLeftExpr . ', ' . $sRightExpr . ')';
+    } else
+      if ($bToNumber) {
+        if (!$this->fnIsNumericExpr($oNode->oLeft)) {
+          $sLeftExpr = 'to_number(' . $sLeftExpr . ')';
+        }
+        if (!$this->fnIsNumericExpr($oNode->oRight)) {
+          $sRightExpr = 'to_number(' . $sRightExpr . ')';
+        }
+      }
+    $sResult = $sLeftExpr . ' ' . $sOp . ' ' . $sRightExpr;
+    if ($bCastFloat) {
+      $sResult = '(float)(' . $sResult . ')';
+    } else
+    if ($this->fnOpPrecedence($oNode->sOperator) < opPrecedence($oNode->rParent->sOperator)) {
+      return '(' . result . ')';
+    }
+    return $sResult;
+  }
+
+  public function fnUnaryExpression($oNode) 
+  {
+    $sOp = $oNode->sOperator;
+    if ($sOp === '!') {
+      return $this->fnIsBooleanExpr($oNode->oArgument) ? '!' . $this->fnGenerate($oNode->oArgument) : 'not(' . $this->fnGenerate($oNode->oArgument) . ')';
+    }
+    //special case here: -3 is just a number literal, not negate(3)
+    if ($sOp === '-' && $oNode->oArgument->sType === 'Literal' && is_numeric($oNode->oArgument->mValue)) {
+      return '-' . $this->fnEncodeLiteral($oNode->oArgument->mValue);
+    }
+    //special case here: `typeof a` can be called on a non-declared variable
+    if ($sOp === 'typeof' && $oNode->oArgument->sType === 'Identifier') {
+      //isset($a) ? _typeof($a) : "undefined"
+      return '(isset(' . $this->fnGenerate($oNode->oArgument) . ') ? _typeof(' . $this->fnGenerate($oNode->oArgument) . ') : "undefined")';
+    }
+    //special case here: `delete a.b.c` needs to compute a.b and then delete c
+    if ($sOp === 'delete' && $oNode->oArgument->sType === 'MemberExpression') {
+      return '_delete(' . $this->fnGenerate($oNode->oArgument->oObject) . ', ' . $this->fnEncodeProp($oNode->oArgument) . ')';
+    }
+    $bToNumber = false;
+    if (in_array($sOp, self::UNARY_NUM_OPS)) {
+      $sOp = self::UNARY_NUM_OPS[$sOp];
+      $bToNumber = true;
+    } else
+      if ($this->fnIsWord($sOp)) {
+        //delete, typeof, void
+        $sOp = '_' . $sOp;
+      }
+    $sResult = $this->fnGenerate($oNode->oArgument);
+    if ($this->fnIsWord($sOp)) {
+      $sResult = '(' . $sResult . ')';
+    } else
+    if ($bToNumber) {
+      if ($oNode->oArgument->sType !== 'Literal' || !is_numeric($oNode->oArgument->mValue)) {
+        $sResult = 'to_number(' . $sResult . ')';
+      }
+    }
+    return $sOp . $sResult;
+  }
+
+  public function fnSequenceExpression($oNode) 
+  {
+    $aExpressions = [];
+    foreach ($oNode->aExpressions as $oENode) {
+      $aExpressions[] = $this->fnGenerate($oENode);
+    }
+    //allow sequence expression only in the init of a for loop
+    if ($oNode->rParent->sType === 'ForStatement' && $oNode->rParent->oInit == $oNode) {
+      return join(', ', $aExpressions);
+    } else {
+      return '_seq(' . join(', ', $aExpressions) . ')';
+    }
+  }
+
+  // used from if/for/while and ternary to determine truthiness
+  public function fnTruthyWrap($oNode) 
+  {
+    //node can be null, for instance: `for (;;) {}`
+    if (!$oNode) return '';
+    $sOp = $oNode->sOperator;
+    $sType = $oNode->sType;
+    if ($sType === 'LogicalExpression') {
+      if ($sOp === '&&' || $sOp === '||') {
+        $sResult = $this->fnTruthyWrap($oNode->oLeft) . ' ' . $sOp . ' ' . $this->fnTruthyWrap($oNode->oRight);
+        if ($this->fnOpPrecedence($sOp) < $this->fnOpPrecedence($oNode->rParent->sOperator)) {
+          $sResult = '(' . $sResult . ')';
+        }
+        return $sResult;
+      }
+    }
+    if ($this->fnIsBooleanExpr($oNode)) {
+      //prevent is($a === $b) and is(_in($a, $b)) and is(not($a))
+      return $this->fnGenerate($oNode);
+    } else {
+      return 'is(' . $this->fnGenerate($oNode) . ')';
+    }
   }
   
   public function fnIsStrictDirective($oStmt)
@@ -237,6 +794,7 @@ class Transpiler
 
   public function fnEncodeRegExp($mValue) 
   {
+    /*
     $sFlags = '';
     if (value.global) flags += 'g';
     if (value.ignoreCase) flags += 'i';
@@ -246,30 +804,47 @@ class Transpiler
       return (s === '\\/') ? '/' : s;
     });
     return 'new RegExp(' + encodeString(source) + ', ' + encodeString(flags) + ')';
+     */
   }
 
-  public function fnEncodeString($mValue) {
+  public function fnEncodeString($mValue) 
+  {
     return Utilities::fnEncodeString($mValue);
   }
 
-  public function fnEncodeVar(identifier) {
+  public function fnEncodeVar($mIdentifier) 
+  {
+    /*
     var name = identifier.name;
-    return encodeVarName(name, identifier.appendSuffix);
+    return $this->fnEncodeVarName(name, identifier.appendSuffix);
+     */
   }
 
-  public function fnEncodeVarName($sName, $sSuffix) {
+  public function fnEncodeVarName($sName, $sSuffix) 
+  {
     return Utilities::fnEncodeVarName($sName, $sSuffix);
   }
 
-  public function fnIsWord($sStr) {
+  public function fnIsWord($sStr) 
+  {
     return preg_match("/^\w+$/", $sStr);
   }
 
-  public function fnOpPrecedence($sOp) {
+  public function fnOpPrecedence($sOp) 
+  {
     return self::BINARY_PRECEDENCE[$sOp];
   }
+
+  public function fnGetParentScope($oNode) 
+  {
+    $oParent = $oNode->rParent;
+    while (!in_array($oParent->sType, self::SCOPE_TYPES)) {
+      $oParent = $oParent->rParent;
+    }
+    return ($oParent->sType === 'Program') ? $oParent : $oParent->aBody;
+  }
   
-  public function fnGenerate($oNode, &$oParent=null)
+  public function fnGenerate(&$oNode, &$oParent=null)
   {
     $aOpts = $this->aOpts;
     if (!isset($aOpts['indentLevel']) || !$aOpts['indentLevel']) {
@@ -279,13 +854,14 @@ class Transpiler
     if ($oNode === null) {
       return '';
     }
+    $oNode->rParent = &$oParent;
     $sType = $oNode->sType;
     $sResult;
     switch ($sType) {
       //STATEMENTS
       case 'Program':
         $aOpts['isStrict'] = $this->fnIsStrictDirective($oNode->aBody[0]);
-        $sResult = $this->fnBody($oNode, $oParent);
+        $sResult = $this->fnBody($oNode);
         break;
       case 'ExpressionStatement':
         $sResult = $this->fnIsStrictDirective($oNode) ? '' : $this->fnGenerate($oNode->oExpression, $oNode) . ';\n';
@@ -369,6 +945,17 @@ class Transpiler
     return $sResult;
   }
   
+  public function fnEncodeProp($oNode) 
+  {
+    if ($oNode->bComputed) {
+      //a[0] or a[b] or a[b + 1]
+      return $this->fnGenerate($oNode->oProperty);
+    } else {
+      //a.b
+      return $this->fnEncodeLiteral($oNode->oProperty->sName);
+    }
+  }
+          
   public function fnIndent($iCount=0) 
   {
     $iIndentLevel = $this->aOpts['indentLevel'] + $iCount;
