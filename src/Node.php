@@ -72,6 +72,9 @@ class Node
   public $sAppendSuffix;
   public $aTerms;
   public $bIsConcat;
+  public $aScopeIndex;
+  public $aFuncs;
+  public $aVars;
   
   public function __construct($oParser, $iPos, $oLoc)
   {

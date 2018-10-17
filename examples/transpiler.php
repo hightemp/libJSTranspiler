@@ -5,9 +5,11 @@ include "../vendor/autoload.php";
 use libJSTranspiler\Parser;
 use libJSTranspiler\Transpiler;
 
-$sInput = file_get_contents("test.js");
-$oTree = Parser::fnParse($sInput);
+$aOptions = [
+  'source' => file_get_contents("test.js")
+];
+
 $oTranspiler = new Transpiler();
 
-echo $oTranspiler->fnGenerate($oTree);
+echo $oTranspiler->fnProcess();
 
