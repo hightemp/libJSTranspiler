@@ -68,6 +68,7 @@ class Node
   public $oMeta;
   public $bTail;
   public $aParams;
+  
   public $rParent;
   public $sAppendSuffix;
   public $aTerms;
@@ -75,6 +76,7 @@ class Node
   public $aScopeIndex;
   public $aFuncs;
   public $aVars;
+  public $bUseStrict;
   
   public function __construct($oParser, $iPos, $oLoc)
   {

@@ -981,6 +981,54 @@ class Transpiler
     return $oRootNode;
   }
 
+  public function fnHandlerNewExpression($oNode) 
+  {
+    if ($oNode->oCallee->sType === 'Identifier' && $oNode->oCallee->sName === 'Function') {
+      $aArgs = $oNode->aArguments;
+      //ensure all arguments are string literals
+      for ($iI = 0, $iLen = count($aArgs); $iI < $iLen; $iI++) {
+        $oArg = $aArgs[$iI];
+        if ($oArg->sType !== 'Literal' || !Is_string($oArg->mValue)) {
+          throw new Exception('Parse Error: new Function() not supported except with string literal');
+        }
+      }
+      $aArgs = array_map(function($v) { return $v->mValue; }, $aArgs);
+      $sBody = array_pop($aArgs);
+      $sCode = '(function(' . join(', ', $aArgs) . ') {' . $sBody . '})';
+      $oAST = $this->fnParse($sCode);
+      $oNewNode = $oAST->aBody[0]->oExpression;
+      $oNewNode->bUseStrict = false;
+      $this->fnReplaceNode($oNode, $oNewNode);
+    }
+  }
+          
+  public function fnHandlerVariableDeclaration($oNode) 
+  {
+    $oScope = $this->fnGetParentScope($oNode);
+    var varNames = $oScope->aVars ? setHidden(scope, 'vars', {});
+    node.declarations.forEach(function(decl) {
+      varNames[decl.id.name] = true;
+    });
+  }
+  
+  public function fnHandlerFunctionDeclaration($oNode) {
+   var name = node.id.name;
+   var scope = utils.getParentScope(node);
+   var funcDeclarations = scope.funcs || setHidden(scope, 'funcs', {});
+   funcDeclarations[name] = node;
+  }
+  
+  public function fnHandlerBinaryExpression($oNode) {
+   if (node.operator === '+') {
+     var terms = getTerms(node, '+');
+     var isConcat = terms.some(function(node) {
+       return (node.type === 'Literal' && typeof node.value === 'string');
+     });
+     setHidden(node, 'terms', terms);
+     setHidden(node, 'isConcat', isConcat);
+   }
+  }
+
   public function fnTransform(&$oAST)
   {
     
