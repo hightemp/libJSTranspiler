@@ -1004,31 +1004,59 @@ class Transpiler
           
   public function fnHandlerVariableDeclaration($oNode) 
   {
-    $oScope = $this->fnGetParentScope($oNode);
-    var varNames = $oScope->aVars ? setHidden(scope, 'vars', {});
-    node.declarations.forEach(function(decl) {
-      varNames[decl.id.name] = true;
-    });
+    $oScope = &$this->fnGetParentScope($oNode);
+    if (!$oScope->aVars) {
+      $oScope->aVars = [];
+    }
+    foreach ($oNode->aDeclarations as $oDecl) {
+      $oScope->aVars[$oDecl->oId->sName] = true;
+    }
   }
   
-  public function fnHandlerFunctionDeclaration($oNode) {
-   var name = node.id.name;
-   var scope = utils.getParentScope(node);
-   var funcDeclarations = scope.funcs || setHidden(scope, 'funcs', {});
-   funcDeclarations[name] = node;
+  public function fnHandlerFunctionDeclaration($oNode) 
+  {
+    $sName = $oNode->oId->sName;
+    $oScope = &$this->fnGetParentScope($oNode);
+    if (!$oScope->aFuncs) {
+      $oScope->aFuncs = [];
+    }
+    $oScope->aFuncs[$sName] = &$oNode;
   }
   
-  public function fnHandlerBinaryExpression($oNode) {
-   if (node.operator === '+') {
-     var terms = getTerms(node, '+');
-     var isConcat = terms.some(function(node) {
-       return (node.type === 'Literal' && typeof node.value === 'string');
-     });
-     setHidden(node, 'terms', terms);
-     setHidden(node, 'isConcat', isConcat);
-   }
+  public function fnHandlerBinaryExpression($oNode) 
+  {
+    if ($oNode->sOperator === '+') {
+      $aTerms = $this->fnGetTerms($oNode, '+');
+      $bIsConcat = false;
+
+      foreach ($aTerms as $oTerm) {
+        if ($oTerm->sType == 'Literal' && is_string($oTerm->mValue)) {
+          $bIsConcat = true;
+          break;
+        }
+      }
+
+      $oNode->aTerms = $aTerms;
+      $oNode->bIsConcat = $bIsConcat;
+    }
   }
 
+  public function fnGetTerms($oNode, $sOp) 
+  {
+    $aTerms = [];
+    if ($oNode->oLeft->sType === 'BinaryExpression' && $oNode->oLeft->sOperator === $sOp) {
+      $aTerms = array_merge($aTerms, $this->fnGetTerms($oNode->oLeft, $sOp));
+    } else {
+      array_push($aTerms, $oNode->oLeft);
+    }
+    if (node.right.type === 'BinaryExpression' && node.right.operator === op) {
+      $aTerms = array_merge($aTerms, $this->fnGetTerms($oNode->oRight, $sOp));
+    } else {
+      array_push($aTerms, $oNode->oRight);
+    }
+    return $aTerms;
+  }
+  
   public function fnTransform(&$oAST)
   {
     
