@@ -162,6 +162,27 @@ class Transpiler
     "_ENV"
   ];
   
+  const BYPASS_RECURSION = [
+    "rRoot",
+    "aComments",
+    "aTokens",
+
+    "oLoc",
+    "aRange",
+
+    "rParent",
+    "rNext",
+    "rPrev",
+
+    // IMPORTANT! "value" can't be bypassed since it is used by object
+    // expression
+    "sType",
+    "sRaw",
+
+    "oStartToken",
+    "oEndToken",
+  ];
+  
   public $aOpts;
   
   public function __construct($aOpts=[])
@@ -228,7 +249,7 @@ class Transpiler
     }
 
     foreach($oNode->aBody as $oNode) {
-      $sResult = $this->fnGenerate($oNode, $oParent);
+      $sResult = $this->fnGenerate($oNode);
       if ($sResult) {
         array_push($aResults, $this->fnIndent() . $sResult);
       }
@@ -840,9 +861,9 @@ class Transpiler
 
   public function fnGetParentScope($oNode) 
   {
-    $oParent = $oNode->rParent;
+    $oParent = &$oNode->rParent;
     while (!in_array($oParent->sType, self::SCOPE_TYPES)) {
-      $oParent = $oParent->rParent;
+      $oParent = &$oParent->rParent;
     }
     return ($oParent->sType === "Program") ? $oParent : $oParent->aBody;
   }
@@ -976,9 +997,79 @@ class Transpiler
   {
     $oRootNode = Parser::fnParse($sSource);
     
-    $this->fnTransform($oAST);
+    $fnInstrumentNodes = function(&$rNode, &$rParent=null, &$rPrev=null, &$rNext=null) use ($oRootNode)
+    {
+      $rNode->rParent = $rParent;
+      $rNode->rPrev = $rPrev;
+      $rNode->rNext = $rNext;
+      $rNode->iDepth = $rParent? $rParent->iDepth + 1 : 0; // used later for moonwalk
+
+      // we do not add nextToken and prevToken to avoid updating even more
+      // references during each remove/before/after you can grab the
+      // prev/next token by simply accesing the startToken.prev and
+      // endToken.next
+      /*
+      $oPrevToken = $rPrev? $rPrev->oEndToken : ($rParent? $rParent->oStartToken : null);
+      $oNextToken = $rParent? $rParent->oEndToken : null;
+      $rNode->oStartToken = $oPrevToken? $this->fnGetNodeStartToken($oPrevToken, $rNode->aRange) : $oRootNode->aTokens[0];
+      $rNode->oEndToken = $oNextToken? $this->fnGetNodeEndToken($oNextToken, $rNode->aRange) : $oRootNode->aTokens[count($oRootNode->aTokens) - 1];
+       */
+    };
+  
+    $this->fnRecursiveWalk($oRootNode, $fnInstrumentNodes);
+    
+    $this->fnTransform($oRootNode);
     
     return $oRootNode;
+  }
+
+  public function fnGetNodeStartToken($oToken, $aRange)
+  {
+    while ($oToken){
+      if ($oToken->aRange[0] >= $aRange[0]) {
+        return $oToken;
+      }
+      $oToken = $oToken->rNext;
+    }
+  }
+
+  public function fnGetNodeEndToken($oToken, $aRange)
+  {
+    while ($oToken){
+      if ($oToken->aRange[1] >= $aRange[1]) {
+        return $oToken;
+      }
+      $oToken = $oToken->rPrev;
+    }
+  }
+  
+  public function fnRecursiveWalk(&$oNode, $fnFn, &$rParent=null, &$rPrev=null, &$rNext=null)
+  {
+    $fnFn = \Closure::bind($fnFn, $this);
+    
+    if (!$oNode || $fnFn($oNode, $rParent, $rPrev, $rNext) === false ) {
+      return; // stop recursion
+    }
+    
+    foreach ($oNode as $sName => $mValue) {
+      if (!$mValue || is_object($mValue) || in_array($sName, self::BYPASS_RECURSION)) {
+        continue;
+      }
+      
+      if (is_string($mValue)) {
+        $this->fnRecursiveWalk($mValue, $fnFn, $oNode);
+      } else if (is_array($mValue)) {
+        foreach ($mValue as $iKey => $oChild) {
+          $this->fnRecursiveWalk(
+            $oChild, 
+            $fnFn, 
+            $oNode, 
+            ($iKey? $mValue[$iKey - 1] : null), 
+            ($iKey<count($mValue)-1? $mValue[$iKey + 1] : null) 
+          );
+        }
+      }
+    }
   }
 
   public function fnHandlerNewExpression($oNode) 
@@ -1057,9 +1148,17 @@ class Transpiler
     return $aTerms;
   }
   
-  public function fnTransform(&$oAST)
+  public function fnTransform(&$rAST)
   {
-    
+    $this->fnRecursiveWalk(
+      $rAST, 
+      function(&$rNode)
+      {
+        if (method_exists($this, 'fn'.$rNode->sType)) {
+          $this->{$rNode->sType}($rNode);
+        }
+      }
+    );
   }
   
   public function fnIndexScope(&$oScope)

@@ -70,6 +70,11 @@ class Node
   public $aParams;
   
   public $rParent;
+  public $rPrev;
+  public $rNext;
+  public $oStartToken;
+  public $oEndToken;
+  public $iDepth;
   public $sAppendSuffix;
   public $aTerms;
   public $bIsConcat;

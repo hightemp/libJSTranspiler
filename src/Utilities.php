@@ -30,18 +30,18 @@ class Utilities
   }
 
   const ESC_CHARS = [
-    '\t' => '\\t',
-    '\n' => '\\n',
-    '\f' => '\\f',
-    '\r' => '\\r',
+    "\t" => '\\t',
+    "\n" => '\\n',
+    "\f" => '\\f',
+    "\r" => '\\r',
     '"'  => '\\"',
     '$'  => '\\$',
-    '\\' => '\\\\'
+    "\\" => '\\\\'
   ];
   
   public static function fnToHex($iCode, $sPrefix) 
   {
-    $sHex = strtoupper(bin2hex($iCode));
+    $sHex = strtoupper(dechex($iCode));
     if (strlen($sHex)==1) {
       $sHex = '0' . $sHex;
     }
@@ -84,8 +84,9 @@ class Utilities
   {
     $sString = preg_replace_callback(
       "/[\\\"\$\x{00}-\x{1F}\x{007F}-\x{FFFF}]/u", 
-      function ($sCh) {
-        return (Utilities::ESC_CHARS[$sCh]) ? Utilities::ESC_CHARS[$sCh] : Utilities::fnEncodeChar($sCh, '\\x');
+      function ($sCh) 
+      {
+        return in_array($sCh[0], array_keys(Utilities::ESC_CHARS)) ? Utilities::ESC_CHARS[$sCh[0]] : Utilities::fnEncodeChar($sCh[0], '\\x');
       },
       $sString
     );
