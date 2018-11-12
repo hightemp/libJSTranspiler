@@ -181,6 +181,11 @@ class Transpiler
 
     "oStartToken",
     "oEndToken",
+    
+    "aTerms",
+    "aVars",
+    "aFuncs",
+    "aScopeIndex",
   ];
   
   public $aOpts;
@@ -1056,9 +1061,10 @@ class Transpiler
         continue;
       }
       
-      if (is_string($mValue)) {
+      /*if (is_string($mValue)) {
         $this->fnRecursiveWalk($mValue, $fnFn, $oNode);
-      } else if (is_array($mValue)) {
+      } else*/
+      if (is_array($mValue)) {
         foreach ($mValue as $iKey => $oChild) {
           $this->fnRecursiveWalk(
             $oChild, 
@@ -1154,8 +1160,8 @@ class Transpiler
       $rAST, 
       function(&$rNode)
       {
-        if (method_exists($this, 'fn'.$rNode->sType)) {
-          $this->{$rNode->sType}($rNode);
+        if (method_exists($this, 'fnHandler'.$rNode->sType)) {
+          $this->{'fnHandler'.$rNode->sType}($rNode);
         }
       }
     );
